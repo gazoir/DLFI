@@ -76,48 +76,108 @@ Hooks.once("init", () => {
     type: String,
     default: ""
   });
+
+  game.settings.registerMenu(MODULE_ID, "openDamnedLucky", {
+    name: "Damned Lucky",
+    label: "Open Damned Lucky",
+    hint: "Open the Sessions / Import / Pack UI.",
+    icon: "fas fa-dungeon",
+    type: DamnedLuckySettingsMenu,
+    restricted: true
+  });
 });
 
 Hooks.once("ready", () => {
   console.log(
-    `${MODULE_ID} | ready (packageFormatVersion ${PACKAGE_FORMAT_VERSION}). Open Damned Lucky from scene controls.`
+    `${MODULE_ID} | ready (packageFormatVersion ${PACKAGE_FORMAT_VERSION}). Open Damned Lucky from scene controls or Configure Settings.`
   );
 });
 
 Hooks.on("getSceneControlButtons", (controls) => {
-  const controlList = Array.isArray(controls) ? controls : Object.values(controls ?? {});
-  const notes = Array.isArray(controls)
-    ? controlList.find((control) => control.name === "notes")
-    : controls.notes;
-  const targetControl = notes ?? controlList.find((control) => control.name === "tokens") ?? controlList[0];
-  if (!targetControl?.tools) {
+  // Foundry v13+: controls is a Record keyed by control name.
+  if (!controls || Array.isArray(controls)) {
+    registerLegacySceneControl(controls);
     return;
   }
 
-  const tools = targetControl.tools;
-  if (Array.isArray(tools)) {
-    if (tools.some((tool) => tool.name === "dlfi")) {
-      return;
-    }
-    tools.push(buildSceneControlTool(tools.length));
+  if (controls.dlfi) {
     return;
   }
 
-  if (tools.dlfi) {
-    return;
-  }
-  tools.dlfi = buildSceneControlTool(Object.keys(tools).length);
-});
-
-function buildSceneControlTool(order) {
-  return {
+  const isGm = Boolean(game.user?.isGM);
+  controls.dlfi = {
     name: "dlfi",
     title: "Damned Lucky",
     icon: "fa-solid fa-dungeon",
-    order,
-    button: true,
-    visible: game.user?.isGM ?? false,
-    onChange: () => openDamnedLuckyApp(),
-    onClick: () => openDamnedLuckyApp()
+    order: Object.keys(controls).length,
+    activeTool: "open",
+    visible: isGm,
+    onChange: (_event, active) => {
+      if (active) {
+        openDamnedLuckyApp();
+      }
+    },
+    tools: {
+      open: {
+        name: "open",
+        title: "Open Damned Lucky",
+        icon: "fa-solid fa-dungeon",
+        order: 0,
+        button: true,
+        visible: isGm,
+        onChange: (_event, active) => {
+          if (active === false) {
+            return;
+          }
+          openDamnedLuckyApp();
+        }
+      }
+    }
   };
+});
+
+function registerLegacySceneControl(controls) {
+  if (!Array.isArray(controls)) {
+    return;
+  }
+  const notes = controls.find((control) => control.name === "notes") ?? controls[0];
+  if (!notes?.tools || notes.tools.some?.((tool) => tool.name === "dlfi")) {
+    return;
+  }
+  notes.tools.push({
+    name: "dlfi",
+    title: "Damned Lucky",
+    icon: "fas fa-dungeon",
+    button: true,
+    onClick: () => openDamnedLuckyApp()
+  });
+}
+
+
+
+
+/**
+ * Settings menu shim: Configure Settings -> Damned Lucky -> Open.
+ * Keep this tiny; the real UI is DamnedLuckyApp.
+ */
+class DamnedLuckySettingsMenu extends foundry.applications.api.ApplicationV2 {
+  static DEFAULT_OPTIONS = {
+    id: "dlfi-settings-menu",
+    window: { title: "Damned Lucky", frame: false },
+    position: { width: 1, height: 1 }
+  };
+
+  async _renderHTML() {
+    return document.createElement("div");
+  }
+
+  _replaceHTML() {}
+
+  async _onFirstRender(context, options) {
+    await super._onFirstRender?.(context, options);
+    queueMicrotask(() => {
+      this.close({ animate: false });
+      openDamnedLuckyApp();
+    });
+  }
 }

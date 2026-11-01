@@ -4,11 +4,11 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.2`)
+## Status (`0.1.3`)
 
 Working in this slice:
 
-- **Damned Lucky** tool on the Notes scene controls → modal tabs Sessions | Import | Pack
+- **Damned Lucky** top-level scene control (+ Configure Settings menu) → modal tabs Sessions | Import | Pack
 - **Import**: scan `Data/dlce-inbox` (setting), list sessions by latest export date, version dropdown, Load
 - **Choose zip…** for a local DLCE export without the inbox
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
