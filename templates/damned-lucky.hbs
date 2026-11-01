@@ -1,0 +1,70 @@
+<section class="dlfi-app">
+  <nav class="dlfi-tabs" aria-label="Damned Lucky tabs">
+    <button type="button" class="dlfi-tab{{#if isSessions}} is-active{{/if}}" data-action="setTab" data-tab="sessions">Sessions</button>
+    <button type="button" class="dlfi-tab{{#if isImport}} is-active{{/if}}" data-action="setTab" data-tab="import">Import</button>
+    <button type="button" class="dlfi-tab{{#if isPack}} is-active{{/if}}" data-action="setTab" data-tab="pack">Pack</button>
+  </nav>
+
+  {{#if isImport}}
+  <div class="dlfi-panel">
+    <p class="notes">Inbox: <code>Data/{{inboxPath}}</code></p>
+    <div class="dlfi-toolbar">
+      <button type="button" data-action="refreshInbox" {{#if busy}}disabled{{/if}}>Refresh inbox</button>
+      <button type="button" data-action="chooseZip" {{#if busy}}disabled{{/if}}>Choose zip…</button>
+    </div>
+    {{#if status}}<p class="dlfi-status">{{status}}</p>{{/if}}
+
+    {{#unless sessions.length}}
+      <p class="notes">No Session Packages found. Export from DLCE (Foundry button), unzip or drop the zip into the inbox, then Refresh.</p>
+    {{/unless}}
+
+    <ol class="dlfi-session-list">
+      {{#each sessions}}
+      <li class="dlfi-session-row">
+        <div class="dlfi-session-main">
+          <div class="dlfi-session-thumb is-empty" aria-hidden="true" title="Session art after import"></div>
+          <div class="dlfi-session-meta">
+            <strong>{{displayCode}}</strong>
+            <span>{{sessionName}}</span>
+            <span class="notes">Party L{{partyLevel}}{{#if crLabel}} · CR {{crLabel}}{{/if}} · {{latestExportedAt}}</span>
+          </div>
+          <button type="button" class="dlfi-load" data-action="loadVersion"
+            data-session-code="{{sessionCode}}" data-exported-at="{{latestExportedAt}}"
+            {{#if ../busy}}disabled{{/if}}>Load</button>
+        </div>
+        {{#if versions.length}}
+        <label class="dlfi-version-label">
+          Version
+          <select class="dlfi-version-select" data-session-code="{{sessionCode}}">
+            {{#each versions}}
+            <option value="{{package.manifest.exportedAt}}"
+              {{#if @first}}selected{{/if}}>
+              {{package.manifest.exportedAt}}
+            </option>
+            {{/each}}
+          </select>
+        </label>
+        <button type="button" class="dlfi-load-version" data-action="loadVersion"
+          data-session-code="{{sessionCode}}"
+          data-exported-at="{{versions.0.package.manifest.exportedAt}}"
+          {{#if ../busy}}disabled{{/if}}>Load selected version</button>
+        {{/if}}
+      </li>
+      {{/each}}
+    </ol>
+  </div>
+  {{/if}}
+
+  {{#if isSessions}}
+  <div class="dlfi-panel">
+    <p class="notes">Activate / bulk-delete for imported session folders lands next. Pack-before-import and exclusive navigation already run on Load.</p>
+  </div>
+  {{/if}}
+
+  {{#if isPack}}
+  <div class="dlfi-panel">
+    <p class="notes">Snapshot the currently live session into a dated Archive compendium.</p>
+    <button type="button" data-action="packLive">Pack live session to Archive</button>
+  </div>
+  {{/if}}
+</section>
