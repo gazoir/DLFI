@@ -1,0 +1,11 @@
+{
+  "DLFI": {
+    "Title": "Damned Lucky Foundry Import",
+    "Tool": "Damned Lucky",
+    "Tabs": {
+      "Sessions": "Sessions",
+      "Import": "Import",
+      "Pack": "Pack"
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gazoir/DLCE/assets/schemas/dlce-session-package.schema.json",
+  "title": "DLCE Session Package Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "packageFormatVersion",
+    "exportedAt",
+    "sessionCode",
+    "sessionName",
+    "displayCode",
+    "partyLevel",
+    "documents",
+    "pcs",
+    "assets"
+  ],
+  "properties": {
+    "packageFormatVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bump when DLFI must change how it reads packages."
+    },
+    "exportedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC export timestamp; DLFI sorts sessions by the latest of these."
+    },
+    "sessionCode": { "type": "string", "minLength": 1 },
+    "sessionName": { "type": "string" },
+    "displayCode": { "type": "string", "minLength": 1 },
+    "partyLevel": { "type": "integer" },
+    "crLabel": { "type": "string" },
+    "foundry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compatibility": { "type": "string" },
+        "dnd5e": { "type": "string" }
+      }
+    },
+    "sessionArt": {
+      "type": ["string", "null"],
+      "description": "Package-relative path under assets/session/"
+    },
+    "msd": {
+      "type": ["string", "null"],
+      "description": "Package-relative path to msd/msd.html"
+    },
+    "documents": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/documentEntry" }
+    },
+    "pcs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pcEntry" }
+    },
+    "assets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["portraits", "tokens", "battlemaps", "session"],
+      "properties": {
+        "portraits": { "type": "array", "items": { "type": "string" } },
+        "tokens": { "type": "array", "items": { "type": "string" } },
+        "battlemaps": { "type": "array", "items": { "type": "string" } },
+        "session": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "documentEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "name", "file"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": {
+          "type": "string",
+          "enum": [
+            "challenge",
+            "event",
+            "faction",
+            "item",
+            "location",
+            "note",
+            "npc",
+            "secret"
+          ]
+        },
+        "name": { "type": "string" },
+        "file": {
+          "type": "string",
+          "description": "Package-relative path under documents/"
+        },
+        "subtype": { "type": "string" },
+        "portrait": { "type": ["string", "null"] },
+        "token": { "type": ["string", "null"] },
+        "battlemap": { "type": ["string", "null"] },
+        "locationIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Linked location DLCE ids for placement / item journals."
+        },
+        "msdOrder": {
+          "type": ["integer", "null"],
+          "description": "1-based order among locations in the MSD when known."
+        }
+      }
+    },
+    "pcEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "ddbId": { "type": ["string", "null"] },
+        "ddbUrl": { "type": ["string", "null"] },
+        "portrait": { "type": ["string", "null"] },
+        "token": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
