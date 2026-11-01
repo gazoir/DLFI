@@ -2,7 +2,7 @@
   "id": "dlfi",
   "title": "Damned Lucky Foundry Import",
   "description": "Import DLCE Session Packages into Foundry VTT: scenes, actors, items, journals, archive packs.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "compatibility": {
     "minimum": "13",
     "verified": "13"

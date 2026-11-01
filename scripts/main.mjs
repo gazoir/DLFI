@@ -85,24 +85,39 @@ Hooks.once("ready", () => {
 });
 
 Hooks.on("getSceneControlButtons", (controls) => {
-  const notes = controls.find((control) => control.name === "notes") ?? controls[0];
-  if (!notes?.tools) {
+  const controlList = Array.isArray(controls) ? controls : Object.values(controls ?? {});
+  const notes = Array.isArray(controls)
+    ? controlList.find((control) => control.name === "notes")
+    : controls.notes;
+  const targetControl = notes ?? controlList.find((control) => control.name === "tokens") ?? controlList[0];
+  if (!targetControl?.tools) {
     return;
   }
-  // Avoid duplicates on re-render
-  if (notes.tools.some?.((tool) => tool.name === "dlfi") || notes.tools.dlfi) {
+
+  const tools = targetControl.tools;
+  if (Array.isArray(tools)) {
+    if (tools.some((tool) => tool.name === "dlfi")) {
+      return;
+    }
+    tools.push(buildSceneControlTool(tools.length));
     return;
   }
-  const tool = {
+
+  if (tools.dlfi) {
+    return;
+  }
+  tools.dlfi = buildSceneControlTool(Object.keys(tools).length);
+});
+
+function buildSceneControlTool(order) {
+  return {
     name: "dlfi",
     title: "Damned Lucky",
-    icon: "fas fa-dungeon",
+    icon: "fa-solid fa-dungeon",
+    order,
     button: true,
+    visible: game.user?.isGM ?? false,
+    onChange: () => openDamnedLuckyApp(),
     onClick: () => openDamnedLuckyApp()
   };
-  if (Array.isArray(notes.tools)) {
-    notes.tools.push(tool);
-  } else {
-    notes.tools.dlfi = tool;
-  }
-});
+}
