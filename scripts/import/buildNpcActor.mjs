@@ -1,25 +1,25 @@
 /**
  * Build a dnd5e NPC Actor create payload from a DLCE document JSON.
  *
- * Preference order:
- * 1. Embedded Foundry actor payload (raw.foundry / raw.actor / raw.system)
- * 2. Map DLCE combat_* (and common aliases) into dnd5e system fields
- *
- * Official foundryvtt-cli packs/unpacks Foundry documents; it does not convert
- * DLCE combat JSON. Mapping belongs here (or in DLCE export).
+ * DLCE field contract (from live exports):
+ * - Abilities: check_str / check_dex / check_con / check_int / check_wis / check_cha
+ * - Size/type: creature_size / creature_type / combat_creature_type
+ * - Speed/senses: free-text combat_speed / combat_senses
+ * - Attacks: combat_attacks JSON string + combat_actions markdown
  */
 
-import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { FLAG_SCOPE } from "../constants.mjs";
+import { markdownToHtml } from "./markdown.mjs";
 
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"];
 
 const ABILITY_ALIASES = {
-  str: ["str", "strength", "combat_str", "combat_strength", "ability_str"],
-  dex: ["dex", "dexterity", "combat_dex", "combat_dexterity", "ability_dex"],
-  con: ["con", "constitution", "combat_con", "combat_constitution", "ability_con"],
-  int: ["int", "intelligence", "combat_int", "combat_intelligence", "ability_int"],
-  wis: ["wis", "wisdom", "combat_wis", "combat_wisdom", "ability_wis"],
-  cha: ["cha", "charisma", "combat_cha", "combat_charisma", "ability_cha"]
+  str: ["check_str", "combat_str", "str", "strength"],
+  dex: ["check_dex", "combat_dex", "dex", "dexterity"],
+  con: ["check_con", "combat_con", "con", "constitution"],
+  int: ["check_int", "combat_int", "int", "intelligence"],
+  wis: ["check_wis", "combat_wis", "wis", "wisdom"],
+  cha: ["check_cha", "combat_cha", "cha", "charisma"]
 };
 
 const SIZE_MAP = {
@@ -35,6 +35,29 @@ const SIZE_MAP = {
   grg: "grg"
 };
 
+const SKILL_MAP = {
+  acrobatics: "acr",
+  "animal handling": "ani",
+  animalhandling: "ani",
+  arcana: "arc",
+  athletics: "ath",
+  deception: "dec",
+  history: "his",
+  insight: "ins",
+  intimidation: "itm",
+  investigation: "inv",
+  medicine: "med",
+  nature: "nat",
+  perception: "prc",
+  performance: "prf",
+  persuasion: "per",
+  religion: "rel",
+  "sleight of hand": "slt",
+  sleightofhand: "slt",
+  stealth: "ste",
+  survival: "sur"
+};
+
 /**
  * @param {object} raw DLCE document JSON
  * @param {object} entry Manifest document entry
@@ -47,15 +70,23 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
     ? foundry.utils.duplicate(embedded.system)
     : buildSystemFromFields(fields);
 
+  const items = embedded?.items
+    ? foundry.utils.duplicate(embedded.items)
+    : buildItemsFromFields(fields);
+
   const name = String(embedded?.name || entry?.name || fields.name || "Unnamed").trim();
   const img = media.portrait || embedded?.img || undefined;
   const tokenSrc = media.token || embedded?.prototypeToken?.texture?.src || img;
+  const size = system?.traits?.size;
+  const tokenSize = sizeToTokenScale(size);
 
   const prototypeToken = foundry.utils.mergeObject(
     embedded?.prototypeToken ? foundry.utils.duplicate(embedded.prototypeToken) : {},
     {
       name,
       actorLink: true,
+      width: tokenSize,
+      height: tokenSize,
       ...(tokenSrc ? { texture: { src: tokenSrc } } : {})
     },
     { inplace: false }
@@ -67,7 +98,7 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
     img,
     folder: media.folderId ?? null,
     system,
-    items: Array.isArray(embedded?.items) ? foundry.utils.duplicate(embedded.items) : [],
+    items,
     effects: Array.isArray(embedded?.effects) ? foundry.utils.duplicate(embedded.effects) : [],
     prototypeToken,
     flags: {
@@ -77,7 +108,8 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
         subtype: entry?.subtype ?? fields.subtype ?? "person",
         locationIds: entry?.locationIds ?? [],
         importKey: media.importKey,
-        source: embedded ? "embedded-foundry" : "dlce-fields"
+        source: embedded ? "embedded-foundry" : "dlce-fields",
+        officialKey: fields.combat_official_key ?? null
       }
     }
   };
@@ -92,19 +124,16 @@ function extractEmbeddedFoundryActor(raw, fields) {
     fields?.foundryActor,
     fields?.foundry_actor,
     fields?.actor,
-    fields?.foundry,
-    raw
+    fields?.foundry
   ];
 
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object") {
       continue;
     }
-    // Full actor document shape
     if (candidate.system && (candidate.type === "npc" || candidate.type === "character")) {
       return candidate;
     }
-    // Bare system blob with abilities/attributes
     if (
       !candidate.type &&
       candidate.system &&
@@ -112,7 +141,6 @@ function extractEmbeddedFoundryActor(raw, fields) {
     ) {
       return { type: "npc", system: candidate.system, items: candidate.items, effects: candidate.effects };
     }
-    // system at top-level of candidate
     if (candidate.abilities || candidate.attributes?.hp || candidate.attributes?.ac) {
       return { type: "npc", system: candidate };
     }
@@ -126,36 +154,58 @@ function buildSystemFromFields(fields) {
     attributes: {
       ac: {},
       hp: {},
-      movement: { walk: 0, fly: 0, swim: 0, climb: 0, burrow: 0, units: "ft", hover: false },
-      senses: { darkvision: 0, blindsight: 0, tremorsense: 0, truesight: 0, units: "ft", special: "" }
+      movement: {
+        walk: null,
+        fly: null,
+        swim: null,
+        climb: null,
+        burrow: null,
+        units: "ft",
+        hover: false
+      },
+      senses: {
+        units: "ft",
+        special: "",
+        ranges: {
+          darkvision: null,
+          blindsight: null,
+          tremorsense: null,
+          truesight: null
+        }
+      }
     },
     details: {
-      biography: { value: htmlFromText(firstString(fields, ["description", "bio", "biography", "notes"])) },
+      biography: {
+        value: markdownToHtml(
+          firstString(fields, ["description", "bio", "biography", "notes", "appearance"])
+        )
+      },
       type: { value: "", subtype: "", swarm: "", custom: "" },
       cr: null,
-      source: { custom: "DLCE" }
+      source: { custom: String(fields.combat_official_key || "DLCE") }
     },
     traits: {
       size: "med",
       languages: { value: [], custom: "" }
-    }
+    },
+    skills: {}
   };
 
   for (const key of ABILITY_KEYS) {
     const score = firstNumber(fields, ABILITY_ALIASES[key]);
     if (score != null) {
-      system.abilities[key] = { value: clampInt(score, 1, 30) };
+      system.abilities[key] = { value: clampInt(score, 1, 30), proficient: 0 };
     }
   }
 
-  const ac = firstNumber(fields, ["combat_ac", "ac", "armor_class", "armorClass", "armor"]);
+  const ac = firstNumber(fields, ["combat_ac", "ac", "armor_class", "armorClass"]);
   if (ac != null) {
-    // dnd5e still accepts calc/flat and migrates to override; set both for safety.
-    system.attributes.ac = { calc: "flat", flat: ac, override: ac };
+    // Match SRD monsters: natural armor with flat value.
+    system.attributes.ac = { calc: "natural", flat: ac };
   }
 
-  const hp = firstNumber(fields, ["combat_hp", "hp", "hit_points", "hitPoints", "hp_max", "max_hp"]);
-  const hpFormula = firstString(fields, ["combat_hp_formula", "hp_formula", "hit_dice", "hitDice", "formula"]);
+  const hp = firstNumber(fields, ["combat_hp", "hp", "hit_points", "hitPoints"]);
+  const hpFormula = firstString(fields, ["combat_hit_dice", "combat_hp_formula", "hp_formula", "hit_dice"]);
   if (hp != null) {
     system.attributes.hp = {
       value: hp,
@@ -166,66 +216,51 @@ function buildSystemFromFields(fields) {
     system.attributes.hp = { formula: hpFormula };
   }
 
-  const walk = firstNumber(fields, ["combat_speed", "speed", "walk", "combat_walk"]);
-  if (walk != null) system.attributes.movement.walk = walk;
-  const fly = firstNumber(fields, ["combat_fly", "fly", "speed_fly"]);
-  if (fly != null) system.attributes.movement.fly = fly;
-  const swim = firstNumber(fields, ["combat_swim", "swim", "speed_swim"]);
-  if (swim != null) system.attributes.movement.swim = swim;
-  const climb = firstNumber(fields, ["combat_climb", "climb", "speed_climb"]);
-  if (climb != null) system.attributes.movement.climb = climb;
-  const burrow = firstNumber(fields, ["combat_burrow", "burrow", "speed_burrow"]);
-  if (burrow != null) system.attributes.movement.burrow = burrow;
+  Object.assign(system.attributes.movement, parseSpeedString(firstString(fields, ["combat_speed", "speed"])));
+  Object.assign(system.attributes.senses, parseSensesString(firstString(fields, ["combat_senses", "senses"])));
 
-  const darkvision = firstNumber(fields, ["combat_darkvision", "darkvision"]);
-  if (darkvision != null) system.attributes.senses.darkvision = darkvision;
-  const blindsight = firstNumber(fields, ["combat_blindsight", "blindsight"]);
-  if (blindsight != null) system.attributes.senses.blindsight = blindsight;
-  const tremorsense = firstNumber(fields, ["combat_tremorsense", "tremorsense"]);
-  if (tremorsense != null) system.attributes.senses.tremorsense = tremorsense;
-  const truesight = firstNumber(fields, ["combat_truesight", "truesight"]);
-  if (truesight != null) system.attributes.senses.truesight = truesight;
-  const specialSenses = firstString(fields, ["combat_senses", "senses"]);
-  if (specialSenses && !/darkvision|blindsight|tremorsense|truesight/i.test(specialSenses)) {
-    system.attributes.senses.special = specialSenses;
-  } else if (specialSenses) {
-    parseSensesString(specialSenses, system.attributes.senses);
-  }
-
-  const cr = firstNumber(fields, ["combat_cr", "cr", "challenge", "challenge_rating", "challengeRating"]);
+  const cr = firstNumber(fields, ["combat_cr", "cr", "challenge", "challenge_rating"]);
   if (cr != null) {
     system.details.cr = cr;
-  } else {
-    const crLabel = firstString(fields, ["crLabel", "cr_label", "challenge_label"]);
-    const parsed = parseCrLabel(crLabel);
-    if (parsed != null) system.details.cr = parsed;
   }
 
-  const creatureType = firstString(fields, ["combat_type", "creature_type", "creatureType"]);
+  const creatureType = firstString(fields, ["combat_creature_type", "creature_type", "creatureType"]);
   if (creatureType) {
     const normalized = creatureType.toLowerCase().trim();
-    const known = CONFIG?.DND5E?.creatureTypes ? Object.keys(CONFIG.DND5E.creatureTypes) : [];
+    const known = CONFIG?.DND5E?.creatureTypes ? Object.keys(CONFIG.DND5E.creatureTypes) : [
+      "aberration", "beast", "celestial", "construct", "dragon", "elemental", "fey", "fiend",
+      "giant", "humanoid", "monstrosity", "ooze", "plant", "undead"
+    ];
     if (known.includes(normalized)) {
       system.details.type.value = normalized;
     } else {
       system.details.type.custom = creatureType;
     }
   }
-  const subtype = firstString(fields, ["combat_subtype", "creature_subtype", "subtype"]);
-  if (subtype) system.details.type.subtype = subtype;
 
-  const alignment = firstString(fields, ["combat_alignment", "alignment"]);
-  if (alignment) system.details.alignment = alignment;
-
-  const sizeRaw = firstString(fields, ["combat_size", "size"]);
-  if (sizeRaw) {
-    const mapped = SIZE_MAP[sizeRaw.toLowerCase().trim()];
-    if (mapped) system.traits.size = mapped;
+  const species = firstString(fields, ["species", "combat_subtype", "creature_subtype"]);
+  if (species) {
+    system.details.type.subtype = species;
   }
 
-  const languages = firstString(fields, ["combat_languages", "languages"]);
-  if (languages) {
-    system.traits.languages.custom = languages;
+  const alignment = firstString(fields, ["combat_alignment", "alignment"]);
+  if (alignment) {
+    system.details.alignment = alignment;
+  }
+
+  const sizeRaw = firstString(fields, ["creature_size", "combat_size", "size"]);
+  if (sizeRaw) {
+    const mapped = SIZE_MAP[sizeRaw.toLowerCase().trim()];
+    if (mapped) {
+      system.traits.size = mapped;
+    }
+  }
+
+  const languages = fields.check_languages ?? fields.combat_languages ?? fields.languages;
+  if (Array.isArray(languages)) {
+    system.traits.languages.custom = languages.filter(Boolean).join(", ");
+  } else if (languages) {
+    system.traits.languages.custom = String(languages);
   }
 
   applySaveProficiencies(system, fields);
@@ -234,64 +269,377 @@ function buildSystemFromFields(fields) {
   return system;
 }
 
+export function buildItemsFromFields(fields) {
+  const items = [];
+  const attackNames = new Set();
+  const attacks = parseJsonField(fields.combat_attacks);
+
+  if (Array.isArray(attacks)) {
+    for (const attack of attacks) {
+      const item = buildWeaponFromAttack(attack, fields);
+      if (item) {
+        items.push(item);
+        attackNames.add(String(attack.name || "").toLowerCase());
+      }
+    }
+  }
+
+  for (const block of parseActionBlocks(firstString(fields, ["combat_actions", "actions"]))) {
+    const key = block.name.toLowerCase().replace(/\s*\([^)]*\)\s*/g, " ").trim();
+    const matchedAttack = [...attackNames].some(
+      (name) => key === name || key.startsWith(`${name} `) || key.includes(` ${name}`)
+    );
+    if (matchedAttack) {
+      continue;
+    }
+    items.push(buildFeatFromAction(block));
+  }
+
+  for (const block of parseActionBlocks(firstString(fields, ["combat_reactions", "reactions"]))) {
+    const feat = buildFeatFromAction(block);
+    feat.system.activities = {
+      [randomId()]: {
+        type: "utility",
+        name: "Use",
+        activation: { type: "reaction", value: null, override: false },
+        consumption: { scaling: { allowed: false }, spellSlot: true, targets: [] },
+        duration: { units: "inst", concentration: false, override: false },
+        range: { override: false, units: "self" },
+        target: { template: { contiguous: false, units: "ft" }, affects: { choice: false }, override: false, prompt: true },
+        uses: { spent: 0, recovery: [] },
+        roll: { prompt: false, visible: false }
+      }
+    };
+    items.push(feat);
+  }
+
+  return items;
+}
+
+function buildWeaponFromAttack(attack, fields) {
+  const name = String(attack?.name || "").trim();
+  if (!name) {
+    return null;
+  }
+  const damages = Array.isArray(attack.damage) ? attack.damage : [];
+  const primary = damages[0] ?? { dice: "1d4", type: "bludgeoning" };
+  const parsedPrimary = parseDiceFormula(primary.dice);
+  const damageType = normalizeDamageType(primary.type);
+  const reach = inferReachFeet(name, fields.combat_actions);
+  const activityId = randomId();
+  const extraParts = damages.slice(1).map((part) => {
+    const parsed = parseDiceFormula(part.dice);
+    return {
+      number: parsed.number,
+      denomination: parsed.denomination,
+      bonus: parsed.bonus,
+      types: [normalizeDamageType(part.type)],
+      custom: { enabled: Boolean(parsed.custom), formula: parsed.custom || "" },
+      scaling: { number: 1 }
+    };
+  });
+
+  const bonus = String(attack.bonus || fields.combat_attack_bonus || "").trim();
+  const descParts = [
+    bonus ? `${bonus} to hit` : null,
+    reach ? `reach ${reach} ft.` : null,
+    `Hit: ${damages.map((d) => `${d.dice} ${d.type}`).join(" plus ")} damage.`
+  ].filter(Boolean);
+
+  return {
+    name,
+    type: "weapon",
+    img: guessAttackIcon(name),
+    system: {
+      description: { value: `<p>${escapeHtml(descParts.join(", "))}</p>`, chat: "" },
+      type: { value: "natural", baseItem: "" },
+      equipped: true,
+      identified: true,
+      quantity: 1,
+      rarity: "",
+      properties: [],
+      range: {
+        units: "ft",
+        value: null,
+        long: null,
+        reach: reach ?? null
+      },
+      damage: {
+        base: {
+          number: parsedPrimary.number,
+          denomination: parsedPrimary.denomination,
+          bonus: parsedPrimary.bonus,
+          types: damageType ? [damageType] : [],
+          custom: { enabled: Boolean(parsedPrimary.custom), formula: parsedPrimary.custom || "" },
+          scaling: { number: 1 }
+        }
+      },
+      activities: {
+        [activityId]: {
+          type: "attack",
+          _id: activityId,
+          activation: { type: "action", value: null, override: false },
+          consumption: { scaling: { allowed: false }, spellSlot: true, targets: [] },
+          duration: { units: "inst", concentration: false, override: false },
+          range: { override: false, units: "self" },
+          target: {
+            template: { contiguous: false, units: "ft", stationary: false },
+            affects: { choice: false },
+            override: false,
+            prompt: true
+          },
+          uses: { spent: 0, recovery: [] },
+          attack: {
+            critical: { threshold: null },
+            flat: Boolean(bonus),
+            ability: "",
+            bonus: bonus.replace(/^\+/, ""),
+            type: { value: "melee", classification: "weapon" }
+          },
+          damage: {
+            critical: {},
+            includeBase: true,
+            parts: extraParts
+          }
+        }
+      }
+    }
+  };
+}
+
+function buildFeatFromAction(block) {
+  return {
+    name: block.name,
+    type: "feat",
+    system: {
+      description: { value: markdownToHtml(block.body), chat: "" },
+      type: { value: "monster", subtype: "" },
+      activities: {
+        [randomId()]: {
+          type: "utility",
+          name: "Use",
+          activation: { type: "action", value: null, override: false },
+          consumption: { scaling: { allowed: false }, spellSlot: true, targets: [] },
+          duration: { units: "inst", concentration: false, override: false },
+          range: { override: false, units: "self" },
+          target: {
+            template: { contiguous: false, units: "ft", stationary: false },
+            affects: { choice: false },
+            override: false,
+            prompt: true
+          },
+          uses: { spent: 0, recovery: [] },
+          roll: { prompt: false, visible: false }
+        }
+      }
+    }
+  };
+}
+
+export function parseSpeedString(text) {
+  const result = {
+    walk: null,
+    fly: null,
+    swim: null,
+    climb: null,
+    burrow: null,
+    units: "ft",
+    hover: /hover/i.test(text || "")
+  };
+  if (!text) {
+    return result;
+  }
+  const source = String(text);
+  const labeled = [
+    ["fly", /fly\s*(\d+)/i],
+    ["swim", /swim\s*(\d+)/i],
+    ["climb", /climb\s*(\d+)/i],
+    ["burrow", /burrow\s*(\d+)/i],
+    ["walk", /walk\s*(\d+)/i]
+  ];
+  for (const [key, re] of labeled) {
+    const match = source.match(re);
+    if (match) {
+      result[key] = Number(match[1]);
+    }
+  }
+  if (result.walk == null) {
+    const bare = source.match(/(?:^|,)\s*(\d+)\s*ft/i);
+    if (bare) {
+      result.walk = Number(bare[1]);
+    }
+  }
+  return result;
+}
+
+export function parseSensesString(text) {
+  const senses = {
+    units: "ft",
+    special: "",
+    ranges: {
+      darkvision: null,
+      blindsight: null,
+      tremorsense: null,
+      truesight: null
+    }
+  };
+  if (!text) {
+    return senses;
+  }
+
+  let remainder = String(text);
+  const patterns = [
+    ["darkvision", /darkvision\s*(\d+)\s*ft\.?/i],
+    ["blindsight", /blindsight\s*(\d+)\s*ft\.?/i],
+    ["tremorsense", /tremorsense\s*(\d+)\s*ft\.?/i],
+    ["truesight", /truesight\s*(\d+)\s*ft\.?/i]
+  ];
+  for (const [key, re] of patterns) {
+    const match = remainder.match(re);
+    if (match) {
+      senses.ranges[key] = Number(match[1]);
+      remainder = remainder.replace(re, "");
+    }
+  }
+
+  remainder = remainder
+    .replace(/,??\s*passive perception\s*\d+/ig, "")
+    .replace(/^[\s,;]+|[\s,;]+$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  senses.special = remainder;
+  return senses;
+}
+
+export function parseActionBlocks(markdown) {
+  const text = String(markdown ?? "").trim();
+  if (!text) {
+    return [];
+  }
+  const blocks = [];
+  const re = /\*\*([^*]+)\*\*\s*\n?([\s\S]*?)(?=\n\*\*|$)/g;
+  let match;
+  while ((match = re.exec(text))) {
+    blocks.push({
+      name: match[1].trim(),
+      body: match[2].trim()
+    });
+  }
+  if (!blocks.length && text) {
+    blocks.push({ name: "Actions", body: text });
+  }
+  return blocks;
+}
+
 function applySaveProficiencies(system, fields) {
-  const saves = firstValue(fields, ["combat_saves", "saving_throws", "savingThrows", "saves"]);
+  const saves = firstString(fields, ["combat_saving_throws", "saving_throws", "saves"]);
   if (!saves) {
     return;
   }
-  const text = typeof saves === "string" ? saves : Array.isArray(saves) ? saves.join(",") : "";
   for (const key of ABILITY_KEYS) {
-    const re = new RegExp(String.raw`\b${key}\b|\b${ABILITY_ALIASES[key][1]}\b`, "i");
-    if (re.test(text)) {
-      system.abilities[key] ??= { value: 10 };
-      system.abilities[key].proficient = 1;
+    const re = new RegExp(String.raw`\b${key}\b|\b${ABILITY_ALIASES[key][3] || key}\b`, "i");
+    if (re.test(saves)) {
+      system.abilities[key] ??= { value: 10, proficient: 0 };
+      // DLCE lists modifiers for all creatures; only mark proficient when explicit "proficient" appears.
+      if (/proficient/i.test(saves)) {
+        system.abilities[key].proficient = 1;
+      }
     }
   }
 }
 
 function applySkillProficiencies(system, fields) {
-  const skills = firstValue(fields, ["combat_skills", "skills"]);
-  if (!skills || typeof skills !== "object" || Array.isArray(skills)) {
-    // string form left for a later slice; scores matter more now
+  const skills = fields.check_skills ?? fields.combat_skills ?? fields.skills;
+  if (!skills) {
     return;
   }
-  system.skills ??= {};
-  for (const [key, value] of Object.entries(skills)) {
-    const abbr = String(key).toLowerCase().slice(0, 3);
-    const num = Number(value);
-    if (!Number.isFinite(num)) {
+  const list = Array.isArray(skills)
+    ? skills
+    : String(skills)
+        .split(/,|;/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+  for (const entry of list) {
+    const abbr = SKILL_MAP[String(entry).toLowerCase().trim()];
+    if (!abbr) {
       continue;
     }
-    system.skills[abbr] = { value: num >= 2 ? 2 : num >= 1 ? 1 : 0 };
+    system.skills[abbr] = {
+      value: 1,
+      ability: abbr === "prc" ? "wis" : undefined,
+      bonuses: { check: "", passive: "" }
+    };
   }
 }
 
-function parseSensesString(text, senses) {
-  const patterns = [
-    ["darkvision", /darkvision\s*(\d+)/i],
-    ["blindsight", /blindsight\s*(\d+)/i],
-    ["tremorsense", /tremorsense\s*(\d+)/i],
-    ["truesight", /truesight\s*(\d+)/i]
-  ];
-  for (const [key, re] of patterns) {
-    const match = text.match(re);
-    if (match) {
-      senses[key] = Number(match[1]);
-    }
+function parseDiceFormula(formula) {
+  const cleaned = String(formula ?? "").replace(/\s+/g, "");
+  const match = cleaned.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
+  if (!match) {
+    return { number: null, denomination: null, bonus: "", custom: String(formula ?? "") };
   }
-  senses.special = text;
+  return {
+    number: Number(match[1]),
+    denomination: Number(match[2]),
+    bonus: match[3] ? String(Number(match[3])) : "",
+    custom: ""
+  };
 }
 
-function parseCrLabel(label) {
-  if (!label) {
+function normalizeDamageType(value) {
+  const type = String(value ?? "").toLowerCase().trim();
+  return type || "bludgeoning";
+}
+
+function inferReachFeet(attackName, actionsMarkdown) {
+  const text = String(actionsMarkdown ?? "");
+  const re = new RegExp(
+    String.raw`\*\*${escapeRegExp(attackName)}[\s\S]*?reach\s*(\d+)\s*ft`,
+    "i"
+  );
+  const match = text.match(re);
+  return match ? Number(match[1]) : null;
+}
+
+function guessAttackIcon(name) {
+  const lower = name.toLowerCase();
+  if (/bite|fang|tooth/.test(lower)) return "icons/creatures/abilities/fangs-teeth-bite.webp";
+  if (/sting|tail/.test(lower)) return "icons/creatures/abilities/stinger-poison-green.webp";
+  if (/claw/.test(lower)) return "icons/creatures/abilities/bear-claws-yellow.webp";
+  return "icons/skills/melee/strike-sword-steel-yellow.webp";
+}
+
+function sizeToTokenScale(size) {
+  switch (size) {
+    case "tiny":
+      return 0.5;
+    case "sm":
+    case "med":
+      return 1;
+    case "lg":
+      return 2;
+    case "huge":
+      return 3;
+    case "grg":
+      return 4;
+    default:
+      return 1;
+  }
+}
+
+function parseJsonField(value) {
+  if (value == null || value === "") {
     return null;
   }
-  const text = String(label).trim();
-  if (/^1\/4$|^0\.25$/i.test(text)) return 0.25;
-  if (/^1\/2$|^0\.5$/i.test(text)) return 0.5;
-  if (/^1\/8$|^0\.125$/i.test(text)) return 0.125;
-  const num = Number(text.replace(/^cr\s*/i, ""));
-  return Number.isFinite(num) ? num : null;
+  if (typeof value === "object") {
+    return value;
+  }
+  try {
+    return JSON.parse(String(value));
+  } catch (_error) {
+    return null;
+  }
 }
 
 function firstNumber(obj, keys) {
@@ -321,31 +669,12 @@ function firstString(obj, keys) {
   return "";
 }
 
-function firstValue(obj, keys) {
-  for (const key of keys) {
-    if (obj?.[key] != null && obj[key] !== "") {
-      return obj[key];
-    }
-  }
-  return null;
-}
-
 function asObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }
 
 function clampInt(value, min, max) {
   return Math.max(min, Math.min(max, Math.round(Number(value))));
-}
-
-function htmlFromText(text) {
-  if (!text) {
-    return "";
-  }
-  if (/[<][a-z!\/]/i.test(text)) {
-    return text;
-  }
-  return `<p>${escapeHtml(text).replace(/\n+/g, "</p><p>")}</p>`;
 }
 
 function escapeHtml(value) {
@@ -356,5 +685,18 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-// Silence unused import in some bundlers
-void MODULE_ID;
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function randomId(size = 16) {
+  if (globalThis.foundry?.utils?.randomID) {
+    return foundry.utils.randomID(size);
+  }
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  for (let i = 0; i < size; i += 1) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
