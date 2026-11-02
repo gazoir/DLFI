@@ -11,7 +11,9 @@ import {
   SETTING_TEMPLATE_LANDING,
   SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
+import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
+import { resolveScene } from "./resolveDocument.mjs";
 
 function decodeJson(bytes) {
   return JSON.parse(new TextDecoder("utf-8").decode(bytes));
@@ -52,19 +54,51 @@ async function uploadAsset(packagePath, bytes, importKey) {
 }
 
 async function duplicateTemplateScene(settingKey, fallbackName) {
-  const id = String(setting(settingKey) || "").trim();
-  if (!id) {
+  const raw = String(setting(settingKey) || "").trim();
+  if (!raw) {
     return null;
   }
-  const template = game.scenes.get(id);
+  const template = await resolveScene(raw);
   if (!template) {
-    notify(`DLFI: template scene not found for ${fallbackName} (${id}).`, { type: "warning" });
+    notify(
+      `DLFI: template scene not found for ${fallbackName} (${raw}). Paste a Scene id or UUID like Scene.xxxxxxxxxxxxxxxx.`,
+      { type: "warning" }
+    );
     return null;
   }
-  const data = template.toObject();
-  delete data._id;
+
+  // Prefer Document#clone so embedded drawings/tokens/lights keep structure with fresh ids.
+  if (typeof template.clone === "function") {
+    try {
+      const cloned = await template.clone(
+        {
+          name: fallbackName,
+          navigation: false,
+          navName: "",
+          active: false
+        },
+        { save: true, keepId: false }
+      );
+      if (cloned) {
+        return cloned;
+      }
+    } catch (error) {
+      console.warn(`${MODULE_ID} | scene clone failed, falling back to fromCompendium`, error);
+    }
+  }
+
+  const data =
+    typeof game.scenes.fromCompendium === "function"
+      ? game.scenes.fromCompendium(template, { clearFolder: true })
+      : (() => {
+          const object = template.toObject();
+          delete object._id;
+          return object;
+        })();
   data.name = fallbackName;
   data.navigation = false;
+  data.navName = "";
+  data.active = false;
   data.navOrder = data.navOrder ?? 0;
   return Scene.create(data);
 }
@@ -224,26 +258,13 @@ export async function importSessionPackage(loaded, options = {}) {
     const raw = docBytes ? decodeJson(docBytes) : {};
     const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
     const token = entry.token ? uploaded.get(entry.token) : null;
-    const actor = await Actor.create({
-      name: entry.name,
-      type: entry.subtype === "monster" ? "npc" : "npc",
-      img: portrait || undefined,
-      folder: folders.Actor?.id ?? null,
-      prototypeToken: token
-        ? { texture: { src: token } }
-        : portrait
-          ? { texture: { src: portrait } }
-          : undefined,
-      system: buildBasicNpcSystem(raw?.fields ?? {}),
-      flags: {
-        [FLAG_SCOPE]: {
-          dlceId: entry.id,
-          subtype: entry.subtype ?? "person",
-          locationIds: entry.locationIds ?? [],
-          importKey
-        }
-      }
+    const actorData = buildNpcNpcActorData(raw, entry, {
+      portrait,
+      token,
+      folderId: folders.Actor?.id ?? null,
+      importKey
     });
+    const actor = await Actor.create(actorData);
     createdByDlceId.set(entry.id, actor.uuid);
 
     // Place on linked location scenes (centred / first slot stub)
@@ -369,24 +390,6 @@ function mapItemType(subtype, fields) {
     return "loot";
   }
   return "loot";
-}
-
-function buildBasicNpcSystem(fields) {
-  const ac = Number(fields.combat_ac);
-  const hp = Number(fields.combat_hp);
-  const system = {
-    details: {
-      biography: { value: String(fields.description || fields.bio || "") }
-    },
-    attributes: {}
-  };
-  if (Number.isFinite(ac)) {
-    system.attributes.ac = { flat: ac, calc: "flat" };
-  }
-  if (Number.isFinite(hp)) {
-    system.attributes.hp = { value: hp, max: hp };
-  }
-  return system;
 }
 
 async function placeDescriptionDrawing(scene, description) {

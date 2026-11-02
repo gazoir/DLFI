@@ -27,8 +27,8 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_LOCATION, {
-    name: "Location scene template (id)",
-    hint: "Paste a Scene id used as the template for location scenes.",
+    name: "Location scene template (id or UUID)",
+    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx). Used when creating location scenes.",
     scope: "world",
     config: true,
     type: String,
@@ -36,7 +36,8 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_BATTLEMAP, {
-    name: "Battlemap scene template (id)",
+    name: "Battlemap scene template (id or UUID)",
+    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx).",
     scope: "world",
     config: true,
     type: String,
@@ -44,7 +45,8 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_LANDING, {
-    name: "Landing page scene template (id)",
+    name: "Landing page scene template (id or UUID)",
+    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx).",
     scope: "world",
     config: true,
     type: String,
@@ -52,8 +54,8 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_INBOX, {
-    name: "Inbox scene template (id)",
-    hint: "Template for the per-import Inbox scene (unplaced actors/items).",
+    name: "Inbox scene template (id or UUID)",
+    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx) for the per-import Inbox scene.",
     scope: "world",
     config: true,
     type: String,
