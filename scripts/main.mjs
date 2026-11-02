@@ -54,8 +54,8 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_INBOX, {
-    name: "Inbox scene template (id or UUID)",
-    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx) for the per-import Inbox scene.",
+    name: "Leftovers scene template (id or UUID)",
+    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx) for the per-import Leftovers scene (unplaced NPCs/items).",
     scope: "world",
     config: true,
     type: String,

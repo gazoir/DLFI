@@ -920,24 +920,7 @@ function parseDuration(body) {
   };
 }
 
-/**
- * Collect location ids from the manifest entry and the document's links[] so NPCs
- * linked to multiple locations are placed on all of them (FOUNDRY_SYNC).
- */
-export function collectNpcLocationIds(entry, raw) {
-  const ids = new Set();
-  for (const id of entry?.locationIds ?? []) {
-    if (id) {
-      ids.add(String(id));
-    }
-  }
-  for (const link of raw?.links ?? []) {
-    if (link?.target_type === "location" && link?.target_id) {
-      ids.add(String(link.target_id));
-    }
-  }
-  return [...ids];
-}
+export { collectNpcLocationIds } from "./packageLinks.mjs";
 
 function guessAttackIcon(name) {
   const lower = name.toLowerCase();

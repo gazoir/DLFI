@@ -54,6 +54,13 @@ const {
 const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = await import(
   "./damageFormula.mjs"
 );
+const {
+  buildNpcLocationsFromLocationLinks,
+  collectChallengeEnemies,
+  locationDescriptionText,
+  resolveColourBattlemapPath,
+  collectNpcLocationIds: collectNpcLocationIdsFromLinks
+} = await import("./packageLinks.mjs");
 
 const DEFAULT_SAMPLES = [
   "/home/ubuntu/.cursor/projects/workspace/uploads/npc_wyvern_025d.json",
@@ -155,6 +162,82 @@ for (const path of paths) {
     linked.every((id) => locs.includes(id)),
     `location links collected (${locs.join(", ") || "none"})`
   );
+}
+
+// Kira: location → NPC reverse link (Owned by), empty NPC links
+{
+  const locPath = "/home/ubuntu/.cursor/projects/workspace/uploads/loc_trader_fd35.json";
+  const npcPath = "/home/ubuntu/.cursor/projects/workspace/uploads/npc_kira_brannardor_df64.json";
+  if (existsSync(locPath) && existsSync(npcPath)) {
+    const loc = JSON.parse(readFileSync(locPath, "utf8"));
+    const npc = JSON.parse(readFileSync(npcPath, "utf8"));
+    const reverse = buildNpcLocationsFromLocationLinks([{ id: loc.id, file: "documents/loc_trader.json" }], (file) =>
+      file ? loc : null
+    );
+    assert(
+      (reverse.get("npc_kira_brannardor") || []).includes("loc_trader"),
+      "reverse index maps Kira ← loc_trader"
+    );
+    const withoutReverse = collectNpcLocationIdsFromLinks(
+      { id: npc.id, locationIds: [] },
+      npc,
+      []
+    );
+    assert(withoutReverse.length === 0, "Kira has no forward location links");
+    const withReverse = collectNpcLocationIdsFromLinks(
+      { id: npc.id, locationIds: [] },
+      npc,
+      reverse.get(npc.id) ?? []
+    );
+    assert(withReverse.includes("loc_trader"), "Kira places on loc_trader via reverse link");
+    assert(
+      locationDescriptionText(loc).includes("trader"),
+      "location description falls back to appearance"
+    );
+  } else {
+    console.log("skip: Kira/trader samples not present");
+  }
+}
+
+// Colour battlemap preference
+{
+  const uploaded = new Map([
+    ["assets/battlemaps/ch_ambush_grid.webp", "world/grid.webp"],
+    ["assets/battlemaps/ch_ambush_colour.webp", "world/colour.webp"],
+    ["assets/battlemaps/ch_ambush_color.png", "world/color.png"]
+  ]);
+  const path = resolveColourBattlemapPath({
+    entry: { id: "ch_ambush", name: "Ambush", battlemap: null },
+    raw: { fields: { kind: "combat" } },
+    locationEntry: null,
+    uploaded,
+    assetPaths: [...uploaded.keys()]
+  });
+  assert(path === "world/colour.webp" || path === "world/color.png", `prefer colour battlemap (got ${path})`);
+  assert(!String(path).includes("grid"), "do not use grid overlay art");
+}
+
+// Challenge enemies from links + fields + reverse NPC links
+{
+  const enemies = collectChallengeEnemies(
+    { id: "ch_fight" },
+    {
+      links: [{ target_type: "npc", target_id: "npc_a", count: 2 }],
+      fields: { enemies: [{ id: "npc_b", quantity: 3 }] }
+    },
+    {
+      npcDocuments: [
+        {
+          id: "npc_c",
+          raw: { links: [{ target_type: "challenge", target_id: "ch_fight" }] }
+        }
+      ]
+    }
+  );
+  const byId = Object.fromEntries(enemies.map((e) => [e.npcId, e.count]));
+  assert(byId.npc_a === 2, "enemy count from challenge link");
+  assert(byId.npc_b === 3, "enemy count from fields.enemies");
+  assert(byId.npc_c === 1, "enemy from NPC→challenge link");
 }
 
 if (failures) {
