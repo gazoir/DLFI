@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.4`)
+## Status (`0.1.5`)
 
 Working in this slice:
 
@@ -14,7 +14,7 @@ Working in this slice:
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
 - Uploads package assets under `Data/dlfi/…`
 - Location / Landing / Battlemap / Inbox scenes (duplicates configured templates when set; accepts Scene id or UUID)
-- NPC actors mapped into dnd5e system fields (abilities/AC/HP/speed/CR/size/type when present; embedded Foundry actor JSON preferred); items + “Items by location” journal; MSD journal
+- NPC actors mapped from DLCE check_*/creature_*/combat_* fields (abilities, size, walk/fly/swim, senses, CR, attacks/actions); items + “Items by location” journal; MSD journal
 - Exclusive scene navigation; Landing activated
 
 Still stubbed: Pack-to-Archive, Sessions activate/bulk-delete, attack/feature item materialization, spell-pack lookup, `NA#`/`NP#` token slots, description drawing randomization polish.

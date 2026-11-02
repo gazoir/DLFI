@@ -12,6 +12,7 @@ import {
   SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
+import { markdownToHtml } from "./markdown.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
 import { resolveScene } from "./resolveDocument.mjs";
 
@@ -293,15 +294,19 @@ export async function importSessionPackage(loaded, options = {}) {
     const docBytes = files.get(entry.file);
     const raw = docBytes ? decodeJson(docBytes) : {};
     const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
+    const fields = raw?.fields ?? {};
     const item = await Item.create({
       name: entry.name,
-      type: mapItemType(entry.subtype, raw?.fields ?? {}),
+      type: mapItemType(entry.subtype, fields),
       img: portrait || undefined,
       folder: folders.Item?.id ?? null,
       system: {
         description: {
-          value: String(raw?.fields?.description || raw?.fields?.appearance || "")
-        }
+          value: markdownToHtml(
+            fields.description || fields.appearance || fields.effect || fields.text || ""
+          )
+        },
+        rarity: String(fields.rarity || "").toLowerCase() || undefined
       },
       flags: {
         [FLAG_SCOPE]: {
