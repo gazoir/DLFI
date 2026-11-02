@@ -145,3 +145,42 @@ export function buildAttackConfig({
     type: { value: attackType, classification: "weapon" }
   };
 }
+
+/**
+ * Predict the Foundry roll formula for a weapon base part after @mod is auto-appended.
+ * dnd5e AttackActivityData._processDamagePart pushes `@mod` onto non-deterministic
+ * weapon base damage unless `@mod` is already present.
+ *
+ * @returns {{ formula: string, matchesDlce: boolean, dlceBonus: number|null }}
+ */
+export function predictFoundryBaseDamage(baseDamage, { abilityMod = null, dlceFormula = "" } = {}) {
+  const dice =
+    baseDamage?.number != null && baseDamage?.denomination != null
+      ? `${baseDamage.number}d${baseDamage.denomination}`
+      : "";
+  const leftover = String(baseDamage?.bonus ?? "").trim();
+  const parts = [];
+  if (dice) {
+    parts.push(dice);
+  }
+  if (leftover && leftover !== "0") {
+    parts.push(leftover.startsWith("+") || leftover.startsWith("-") ? leftover : `+${leftover}`);
+  }
+  // Foundry appends @mod for weapon base when the formula is non-deterministic.
+  const isDeterministic = !dice && leftover !== "";
+  if (!isDeterministic && abilityMod != null && Number.isFinite(abilityMod)) {
+    parts.push("@mod");
+  }
+
+  const formula = parts.join(" + ").replace(/\+ -/g, "- ").replace(/\s+/g, " ").trim();
+  const dlce = parseDiceFormula(dlceFormula);
+  const dlceBonus = dlce.custom ? null : dlce.bonus === "" ? 0 : Number(dlce.bonus);
+  const expectedNumeric =
+    abilityMod != null && Number.isFinite(abilityMod) && dlceBonus != null
+      ? (leftover === "" || leftover === "0" ? 0 : Number(leftover)) + Number(abilityMod)
+      : null;
+  const matchesDlce =
+    expectedNumeric == null || !Number.isFinite(dlceBonus) ? true : expectedNumeric === dlceBonus;
+
+  return { formula, matchesDlce, dlceBonus, expectedNumeric };
+}
