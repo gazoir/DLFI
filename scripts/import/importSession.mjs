@@ -13,6 +13,11 @@ import {
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import { markdownToHtml } from "./markdown.mjs";
+import {
+  finalizeLandingScene,
+  finalizeLocationScene,
+  finalizeUtilityScene
+} from "./scenePlacement.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
 import { resolveScene } from "./resolveDocument.mjs";
 
@@ -139,8 +144,14 @@ export async function importSessionPackage(loaded, options = {}) {
 
   /** @type {Map<string, string>} dlce id -> Foundry doc uuid */
   const createdByDlceId = new Map();
+  /** @type {Map<string, { scene: Scene, description: string, npcs: Array<{actor: Actor, entry: object}> }>} */
+  const locationSceneMeta = new Map();
   /** @type {string[]} */
   const sessionSceneIds = [];
+  let landingScene = null;
+  let inboxScene = null;
+  /** @type {Scene[]} */
+  const battlemapScenes = [];
 
   // --- Locations as scenes ---
   const locations = (manifest.documents ?? []).filter((entry) => entry.type === "location");
@@ -176,14 +187,11 @@ export async function importSessionPackage(loaded, options = {}) {
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
 
-    // Description → text drawing (random among Description 1-4 if present on template)
     const docBytes = files.get(entry.file);
     const description = docBytes
       ? String(decodeJson(docBytes)?.fields?.description ?? "").trim()
       : "";
-    if (description) {
-      await placeDescriptionDrawing(scene, description);
-    }
+    locationSceneMeta.set(entry.id, { scene, description, npcs: [] });
   }
 
   // --- Landing ---
@@ -204,6 +212,7 @@ export async function importSessionPackage(loaded, options = {}) {
     flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
   });
   sessionSceneIds.push(landing.id);
+  landingScene = landing;
 
   // --- Per-import Inbox ---
   let inbox =
@@ -220,6 +229,7 @@ export async function importSessionPackage(loaded, options = {}) {
     folder: folders.Scene?.id ?? null,
     flags: { [FLAG_SCOPE]: { kind: "inbox", importKey } }
   });
+  inboxScene = inbox;
 
   // --- Battlemap scenes for combat challenges ---
   const combats = (manifest.documents ?? []).filter((entry) => entry.type === "challenge");
@@ -251,6 +261,7 @@ export async function importSessionPackage(loaded, options = {}) {
     });
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
+    battlemapScenes.push(scene);
   }
 
   // --- NPCs / monsters as Actors ---
@@ -268,23 +279,38 @@ export async function importSessionPackage(loaded, options = {}) {
     const actor = await Actor.create(actorData);
     createdByDlceId.set(entry.id, actor.uuid);
 
-    // Place on linked location scenes (centred / first slot stub)
     for (const locationId of entry.locationIds ?? []) {
-      const sceneUuid = createdByDlceId.get(locationId);
-      const scene = sceneUuid ? fromUuidSync(sceneUuid) : null;
-      if (scene?.createEmbeddedDocuments) {
-        await scene.createEmbeddedDocuments("Token", [
-          {
-            name: entry.name,
-            actorId: actor.id,
-            actorLink: true,
-            texture: { src: token || portrait || actor.img },
-            x: Math.round((scene.width ?? 4000) / 2),
-            y: Math.round((scene.height ?? 3000) / 2)
-          }
-        ]);
+      const meta = locationSceneMeta.get(locationId);
+      if (meta) {
+        meta.npcs.push({ actor, entry });
       }
     }
+  }
+
+  // Bind NPCs into template slots, fill descriptions, remove unused placeholders
+  for (const meta of locationSceneMeta.values()) {
+    await finalizeLocationScene(meta.scene, {
+      description: meta.description,
+      npcs: meta.npcs
+    });
+  }
+
+  // Landing PC slots (match existing world actors by DDB id then name)
+  const matchedPcs = [];
+  for (const pc of manifest.pcs ?? []) {
+    const actor = matchExistingPcActor(pc);
+    if (actor) {
+      matchedPcs.push({ actor, pc });
+    }
+  }
+  if (landingScene) {
+    await finalizeLandingScene(landingScene, matchedPcs);
+  }
+  if (inboxScene) {
+    await finalizeUtilityScene(inboxScene);
+  }
+  for (const battleScene of battlemapScenes) {
+    await finalizeUtilityScene(battleScene);
   }
 
   // --- Items ---
@@ -385,6 +411,32 @@ export async function importSessionPackage(loaded, options = {}) {
     sceneIds: sessionSceneIds,
     landingId: landing?.id ?? null
   };
+}
+
+
+function matchExistingPcActor(pc) {
+  const ddbId = pc?.ddbId != null ? String(pc.ddbId).trim() : "";
+  const name = String(pc?.name || "").trim().toLowerCase();
+  const actors = [...(game.actors ?? [])];
+  if (ddbId) {
+    const byDdb = actors.find((actor) => {
+      const flags = actor.flags ?? {};
+      const candidates = [
+        flags?.ddbimporter?.dndbeyond?.characterId,
+        flags?.ddbimporter?.id,
+        flags?.["ddb-importer"]?.id,
+        flags?.[FLAG_SCOPE]?.ddbId
+      ];
+      return candidates.some((value) => value != null && String(value) === ddbId);
+    });
+    if (byDdb) {
+      return byDdb;
+    }
+  }
+  if (!name) {
+    return null;
+  }
+  return actors.find((actor) => String(actor.name || "").trim().toLowerCase() === name) ?? null;
 }
 
 function mapItemType(subtype, fields) {
