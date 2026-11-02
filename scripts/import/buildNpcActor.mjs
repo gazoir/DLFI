@@ -9,6 +9,12 @@
  */
 
 import { FLAG_SCOPE } from "../constants.mjs";
+import {
+  abilityModifier,
+  buildAttackConfig,
+  parseExtraDamagePart,
+  parseWeaponBaseDamage
+} from "./damageFormula.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"];
@@ -272,7 +278,10 @@ function buildSystemFromFields(fields) {
 export function buildItemsFromFields(fields) {
   const items = [];
   const attackNames = new Set();
-  const attacks = parseJsonField(fields.combat_attacks);
+  let attacks = parseJsonField(fields.combat_attacks);
+  if (!Array.isArray(attacks) || !attacks.length) {
+    attacks = synthesizeAttacksFromActions(firstString(fields, ["combat_actions", "actions"]));
+  }
 
   if (Array.isArray(attacks)) {
     for (const attack of attacks) {
@@ -287,7 +296,7 @@ export function buildItemsFromFields(fields) {
   for (const block of parseActionBlocks(firstString(fields, ["combat_actions", "actions"]))) {
     const key = block.name.toLowerCase().replace(/\s*\([^)]*\)\s*/g, " ").trim();
     const matchedAttack = [...attackNames].some(
-      (name) => key === name || key.startsWith(`${name} `) || key.includes(` ${name}`)
+      (name) => key === name || key.startsWith(`${name} `) || key.startsWith(name)
     );
     if (matchedAttack) {
       continue;
@@ -323,25 +332,27 @@ function buildWeaponFromAttack(attack, fields) {
   }
   const damages = Array.isArray(attack.damage) ? attack.damage : [];
   const primary = damages[0] ?? { dice: "1d4", type: "bludgeoning" };
-  const parsedPrimary = parseDiceFormula(primary.dice);
-  const damageType = normalizeDamageType(primary.type);
+  const strMod = abilityModifier(firstNumber(fields, ["check_str", "combat_str", "str"]));
+  const dexMod = abilityModifier(firstNumber(fields, ["check_dex", "combat_dex", "dex"]));
+  const attackType = inferAttackType(name, fields.combat_actions);
+  const abilityMod = attackType === "ranged" ? dexMod : strMod;
+  const baseDamage = parseWeaponBaseDamage(primary.dice, { abilityMod });
+  const damageType = String(primary.type || "bludgeoning").toLowerCase();
   const reach = inferReachFeet(name, fields.combat_actions);
   const activityId = randomId();
-  const extraParts = damages.slice(1).map((part) => {
-    const parsed = parseDiceFormula(part.dice);
-    return {
-      number: parsed.number,
-      denomination: parsed.denomination,
-      bonus: parsed.bonus,
-      types: [normalizeDamageType(part.type)],
-      custom: { enabled: Boolean(parsed.custom), formula: parsed.custom || "" },
-      scaling: { number: 1 }
-    };
+  const extraParts = damages.slice(1).map((part) => parseExtraDamagePart(part.dice, part.type));
+
+  const statedBonus = String(attack.bonus || fields.combat_attack_bonus || "").trim();
+  const prof = firstNumber(fields, ["check_prof", "combat_prof", "proficiency", "proficiency_bonus"]);
+  const attackConfig = buildAttackConfig({
+    attackBonus: statedBonus,
+    abilityMod,
+    proficiencyBonus: prof,
+    attackType
   });
 
-  const bonus = String(attack.bonus || fields.combat_attack_bonus || "").trim();
   const descParts = [
-    bonus ? `${bonus} to hit` : null,
+    statedBonus ? `${statedBonus} to hit` : null,
     reach ? `reach ${reach} ft.` : null,
     `Hit: ${damages.map((d) => `${d.dice} ${d.type}`).join(" plus ")} damage.`
   ].filter(Boolean);
@@ -351,7 +362,10 @@ function buildWeaponFromAttack(attack, fields) {
     type: "weapon",
     img: guessAttackIcon(name),
     system: {
-      description: { value: `<p>${escapeHtml(descParts.join(", "))}</p>`, chat: "" },
+      description: {
+        value: `<p>${escapeHtml(descParts.join(", "))}</p>`,
+        chat: ""
+      },
       type: { value: "natural", baseItem: "" },
       equipped: true,
       identified: true,
@@ -366,11 +380,11 @@ function buildWeaponFromAttack(attack, fields) {
       },
       damage: {
         base: {
-          number: parsedPrimary.number,
-          denomination: parsedPrimary.denomination,
-          bonus: parsedPrimary.bonus,
+          number: baseDamage.number,
+          denomination: baseDamage.denomination,
+          bonus: baseDamage.bonus,
           types: damageType ? [damageType] : [],
-          custom: { enabled: Boolean(parsedPrimary.custom), formula: parsedPrimary.custom || "" },
+          custom: baseDamage.custom,
           scaling: { number: 1 }
         }
       },
@@ -391,10 +405,7 @@ function buildWeaponFromAttack(attack, fields) {
           uses: { spent: 0, recovery: [] },
           attack: {
             critical: { threshold: null },
-            flat: Boolean(bonus),
-            ability: "",
-            bonus: bonus.replace(/^\+/, ""),
-            type: { value: "melee", classification: "weapon" }
+            ...attackConfig
           },
           damage: {
             critical: {},
@@ -405,6 +416,15 @@ function buildWeaponFromAttack(attack, fields) {
       }
     }
   };
+}
+
+function inferAttackType(attackName, actionsMarkdown) {
+  const text = `${attackName}
+${actionsMarkdown || ""}`.toLowerCase();
+  if (/ranged|ranged weapon attack|shot|bolt|spit/.test(text)) {
+    return "ranged";
+  }
+  return "melee";
 }
 
 function buildFeatFromAction(block) {
@@ -512,6 +532,32 @@ export function parseSensesString(text) {
   return senses;
 }
 
+
+function synthesizeAttacksFromActions(markdown) {
+  const attacks = [];
+  for (const block of parseActionBlocks(markdown)) {
+    const body = block.body || "";
+    // "+4 to hit" / "+7," patterns imply a weapon attack
+    const bonusMatch = body.match(/([+-]\d+)(?:\s*to hit|,)/i);
+    const hitMatch = body.match(/Hit:\s*[^.]*?(\d+)?\s*\(?([0-9dD+\-\s]+)\)?\s*([A-Za-z]+)(?:\s*damage)?/i);
+    const diceMatch = body.match(/(\d+d\d+(?:\s*[+-]\s*\d+)?)/i);
+    if (!bonusMatch && !/weapon attack|to hit/i.test(body)) {
+      continue;
+    }
+    const dice = (hitMatch && hitMatch[2]) ? hitMatch[2].replace(/\s+/g, " ").trim() : (diceMatch ? diceMatch[1] : null);
+    if (!dice) {
+      continue;
+    }
+    const type = (hitMatch && hitMatch[3]) ? hitMatch[3] : "bludgeoning";
+    attacks.push({
+      name: block.name.replace(/\s*\([^)]*\)\s*$/, "").trim(),
+      bonus: bonusMatch ? bonusMatch[1] : "",
+      damage: [{ dice, type }]
+    });
+  }
+  return attacks;
+}
+
 export function parseActionBlocks(markdown) {
   const text = String(markdown ?? "").trim();
   if (!text) {
@@ -573,24 +619,7 @@ function applySkillProficiencies(system, fields) {
   }
 }
 
-function parseDiceFormula(formula) {
-  const cleaned = String(formula ?? "").replace(/\s+/g, "");
-  const match = cleaned.match(/^(\d+)d(\d+)([+-]\d+)?$/i);
-  if (!match) {
-    return { number: null, denomination: null, bonus: "", custom: String(formula ?? "") };
-  }
-  return {
-    number: Number(match[1]),
-    denomination: Number(match[2]),
-    bonus: match[3] ? String(Number(match[3])) : "",
-    custom: ""
-  };
-}
 
-function normalizeDamageType(value) {
-  const type = String(value ?? "").toLowerCase().trim();
-  return type || "bludgeoning";
-}
 
 function inferReachFeet(attackName, actionsMarkdown) {
   const text = String(actionsMarkdown ?? "");
