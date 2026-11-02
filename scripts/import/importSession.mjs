@@ -11,7 +11,7 @@ import {
   SETTING_TEMPLATE_LANDING,
   SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
-import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
+import { buildNpcNpcActorData, collectNpcLocationIds } from "./buildNpcActor.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
   finalizeLandingScene,
@@ -279,7 +279,7 @@ export async function importSessionPackage(loaded, options = {}) {
     const actor = await Actor.create(actorData);
     createdByDlceId.set(entry.id, actor.uuid);
 
-    for (const locationId of entry.locationIds ?? []) {
+    for (const locationId of collectNpcLocationIds(entry, raw)) {
       const meta = locationSceneMeta.get(locationId);
       if (meta) {
         meta.npcs.push({ actor, entry });
@@ -447,40 +447,6 @@ function mapItemType(subtype, fields) {
     return "loot";
   }
   return "loot";
-}
-
-async function placeDescriptionDrawing(scene, description) {
-  const drawings = scene.drawings?.contents ?? scene.drawings ?? [];
-  const candidates = drawings.filter((drawing) =>
-    /^Description\s*[1-4]$/i.test(String(drawing.text ?? drawing.name ?? "").trim())
-  );
-  const pick =
-    candidates.length > 0
-      ? candidates[Math.floor(Math.random() * candidates.length)]
-      : null;
-
-  if (pick) {
-    await scene.updateEmbeddedDocuments("Drawing", [
-      {
-        _id: pick.id,
-        text: description,
-        hidden: true
-      }
-    ]);
-    return;
-  }
-
-  await scene.createEmbeddedDocuments("Drawing", [
-    {
-      x: 100,
-      y: 100,
-      shape: { type: "r", width: 800, height: 400 },
-      text: description,
-      hidden: true,
-      fontSize: 48,
-      strokeWidth: 0
-    }
-  ]);
 }
 
 function rewriteMsdLinks(html, createdByDlceId) {

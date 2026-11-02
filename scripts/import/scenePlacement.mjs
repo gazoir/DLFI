@@ -12,6 +12,7 @@ import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
+// Match "Description 1" … "Description 4" on drawing text or name (template exports vary).
 const DESCRIPTION_RE = /^Description\s*([1-4])$/i;
 
 export async function finalizeLocationScene(scene, { description = "", npcs = [] } = {}) {
@@ -78,7 +79,8 @@ async function placeDescriptionOnScene(scene, description, candidates) {
     ]);
     return null;
   }
-  const pick = candidates[Math.floor(Math.random() * candidates.length)];
+  // Prefer Description 1 (already sorted) so placement is deterministic across imports.
+  const pick = candidates[0];
   await scene.updateEmbeddedDocuments("Drawing", [
     {
       _id: pick.id,
