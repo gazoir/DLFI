@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.9`)
+## Status (`0.1.10`)
 
 Working in this slice:
 
@@ -13,7 +13,8 @@ Working in this slice:
 - **Choose zip…** for a local DLCE export without the inbox
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
 - Uploads package assets under `Data/dlfi/…`
-- Location / Landing / Battlemap / Leftovers scenes (duplicates configured templates when set; accepts Scene id or UUID)
+- Location / Landing / Battlemap / Leftovers scenes (configured templates, or bundled Expo/Landing/Battlemap defaults when unset)
+- Asset uploads create `Data/dlfi/…` folders first (fixes missing portraits/battlemaps directories)
 - Template placement: fill Description 1 (or appearance), put location POIs as a bullet list in another Description box, bind NPCs to `1A#` slots (actor + token art) including reverse location→NPC links, PCs to `3P#`–`6P#` on Landing, delete unused placeholders
 - Battlemaps use the colour (non-grid) combat art and place unlinked enemy tokens from the encounter
 - Leftovers holds NPCs/items not placed on any location or battlemap

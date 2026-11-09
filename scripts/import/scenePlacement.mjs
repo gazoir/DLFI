@@ -66,13 +66,15 @@ export async function finalizeLocationScene(
 
 export async function finalizeLandingScene(scene, pcs = []) {
   if (!scene) return;
+  // Prefer dedicated PC slots (3P1…); fall back to A-slots used by the bundled landing template.
   const pcSlots = listPcSlots(scene);
-  const usedPcIds = await placePcsOnScene(scene, pcs, pcSlots);
+  const slots = pcSlots.length ? pcSlots : listNpcSlots(scene);
+  const usedPcIds = await placePcsOnScene(scene, pcs, slots);
 
   const deleteDrawingIds = listDescriptionDrawings(scene).map((d) => d.id);
   const deleteTokenIds = [
-    ...listNpcSlots(scene).map((t) => t.id),
-    ...pcSlots.map((t) => t.id).filter((id) => !usedPcIds.has(id))
+    ...(pcSlots.length ? listNpcSlots(scene).map((t) => t.id) : []),
+    ...slots.map((t) => t.id).filter((id) => !usedPcIds.has(id))
   ];
   await deleteEmbedded(scene, deleteDrawingIds, deleteTokenIds);
 }

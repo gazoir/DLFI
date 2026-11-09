@@ -28,6 +28,10 @@ import {
   finalizeLeftoversScene,
   finalizeLocationScene
 } from "./scenePlacement.mjs";
+import {
+  bundledKindForSetting,
+  createSceneFromBundledTemplate
+} from "./defaultTemplates.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
 import { resolveScene } from "./resolveDocument.mjs";
 
@@ -48,6 +52,40 @@ function padOrder(order) {
 }
 
 /**
+ * Ensure a Data/ folder path exists (FilePicker.upload does not create parents).
+ * @param {string} folderPath e.g. "dlfi/SESSION_…/assets/portraits"
+ */
+async function ensureDataFolder(folderPath) {
+  const normalized = String(folderPath ?? "")
+    .replace(/^\/+/, "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  if (!normalized) {
+    return;
+  }
+  const parts = normalized.split("/").filter(Boolean);
+  let current = "";
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    try {
+      await FilePicker.createDirectory("data", current, { notify: false });
+    } catch (error) {
+      // Directory already exists — Foundry throws variously by version/OS.
+      const message = String(error?.message ?? error ?? "");
+      if (!/exist|EEXIST|already/i.test(message)) {
+        // Browse to confirm; if browse works the folder is fine.
+        try {
+          await FilePicker.browse("data", current);
+        } catch (browseError) {
+          console.warn(`${MODULE_ID} | could not ensure folder ${current}`, error, browseError);
+          throw error;
+        }
+      }
+    }
+  }
+}
+
+/**
  * Upload a package asset into Foundry's world data storage.
  * @param {string} packagePath
  * @param {Uint8Array} bytes
@@ -61,62 +99,94 @@ async function uploadAsset(packagePath, bytes, importKey) {
   const blob = new Blob([bytes]);
   const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
   try {
-    await FilePicker.upload("data", folder, file, { notify: false });
+    await ensureDataFolder(folder);
+    await FilePicker.upload("data", folder, file, {}, { notify: false });
+    return target;
   } catch (error) {
-    console.warn(`${MODULE_ID} | upload failed for ${target}`, error);
-    return null;
+    // Older Foundry signatures: upload(source, path, file, options)
+    try {
+      await ensureDataFolder(folder);
+      await FilePicker.upload("data", folder, file, { notify: false });
+      return target;
+    } catch (retryError) {
+      console.warn(`${MODULE_ID} | upload failed for ${target}`, retryError || error);
+      return null;
+    }
   }
-  return target;
 }
 
-async function duplicateTemplateScene(settingKey, fallbackName) {
+/**
+ * Duplicate a configured template Scene, or fall back to the bundled module template.
+ * @param {string} settingKey
+ * @param {string} fallbackName
+ * @param {{ folderId?: string|null, flags?: object }} [options]
+ */
+async function duplicateTemplateScene(settingKey, fallbackName, options = {}) {
   const raw = String(setting(settingKey) || "").trim();
-  if (!raw) {
-    return null;
-  }
-  const template = await resolveScene(raw);
-  if (!template) {
-    notify(
-      `DLFI: template scene not found for ${fallbackName} (${raw}). Paste a Scene id or UUID like Scene.xxxxxxxxxxxxxxxx.`,
-      { type: "warning" }
-    );
-    return null;
-  }
+  const bundledKind = bundledKindForSetting(settingKey);
 
-  // Prefer Document#clone so embedded drawings/tokens/lights keep structure with fresh ids.
-  if (typeof template.clone === "function") {
-    try {
-      const cloned = await template.clone(
-        {
-          name: fallbackName,
-          navigation: false,
-          navName: "",
-          active: false
-        },
-        { save: true, keepId: false }
+  if (raw) {
+    const template = await resolveScene(raw);
+    if (!template) {
+      notify(
+        `DLFI: template scene not found for ${fallbackName} (${raw}); using bundled default.`,
+        { type: "warning" }
       );
-      if (cloned) {
-        return cloned;
+    } else {
+      // Prefer Document#clone so embedded drawings/tokens/lights keep structure with fresh ids.
+      if (typeof template.clone === "function") {
+        try {
+          const cloned = await template.clone(
+            {
+              name: fallbackName,
+              navigation: false,
+              navName: "",
+              active: false,
+              folder: options.folderId ?? template.folder ?? null,
+              ...(options.flags ? { flags: options.flags } : {})
+            },
+            { save: true, keepId: false }
+          );
+          if (cloned) {
+            return cloned;
+          }
+        } catch (error) {
+          console.warn(`${MODULE_ID} | scene clone failed, falling back to fromCompendium`, error);
+        }
       }
-    } catch (error) {
-      console.warn(`${MODULE_ID} | scene clone failed, falling back to fromCompendium`, error);
+
+      const data =
+        typeof game.scenes.fromCompendium === "function"
+          ? game.scenes.fromCompendium(template, { clearFolder: true })
+          : (() => {
+              const object = template.toObject();
+              delete object._id;
+              return object;
+            })();
+      data.name = fallbackName;
+      data.navigation = false;
+      data.navName = "";
+      data.active = false;
+      data.navOrder = data.navOrder ?? 0;
+      data.folder = options.folderId ?? null;
+      if (options.flags) {
+        data.flags = { ...(data.flags ?? {}), ...options.flags };
+      }
+      return Scene.create(data);
     }
   }
 
-  const data =
-    typeof game.scenes.fromCompendium === "function"
-      ? game.scenes.fromCompendium(template, { clearFolder: true })
-      : (() => {
-          const object = template.toObject();
-          delete object._id;
-          return object;
-        })();
-  data.name = fallbackName;
-  data.navigation = false;
-  data.navName = "";
-  data.active = false;
-  data.navOrder = data.navOrder ?? 0;
-  return Scene.create(data);
+  if (bundledKind) {
+    const created = await createSceneFromBundledTemplate(bundledKind, fallbackName, {
+      folder: options.folderId ?? null,
+      flags: options.flags
+    });
+    if (created) {
+      console.log(`${MODULE_ID} | using bundled ${bundledKind} template for ${fallbackName}`);
+      return created;
+    }
+  }
+  return null;
 }
 
 /**
@@ -140,6 +210,16 @@ export async function importSessionPackage(loaded, options = {}) {
 
   /** @type {Map<string, string>} packagePath -> world data path */
   const uploaded = new Map();
+  const safeImportKey = importKey.replace(/[^a-zA-Z0-9_-]+/g, "_");
+  // FilePicker.upload requires the target directory to already exist.
+  for (const sub of ["assets/portraits", "assets/tokens", "assets/battlemaps", "assets/session"]) {
+    try {
+      await ensureDataFolder(`dlfi/${safeImportKey}/${sub}`);
+    } catch (error) {
+      console.warn(`${MODULE_ID} | precreate ${sub} failed`, error);
+    }
+  }
+  let uploadFailures = 0;
   for (const [path, bytes] of files) {
     if (!path.startsWith("assets/")) {
       continue;
@@ -147,7 +227,14 @@ export async function importSessionPackage(loaded, options = {}) {
     const worldPath = await uploadAsset(path, bytes, importKey);
     if (worldPath) {
       uploaded.set(path, worldPath);
+    } else {
+      uploadFailures += 1;
     }
+  }
+  if (uploadFailures) {
+    notify(`DLFI: ${uploadFailures} asset upload(s) failed — check console for paths.`, {
+      type: "warning"
+    });
   }
 
   const readDocument = (file) => {
@@ -183,7 +270,10 @@ export async function importSessionPackage(loaded, options = {}) {
     const order = padOrder(entry.msdOrder);
     const dmName = `${order}. ${entry.name}`;
     let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName)) ??
+      (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName, {
+        folderId: folders.Scene?.id ?? null,
+        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+      })) ??
       (await Scene.create({
         name: dmName,
         navigation: true,
@@ -221,7 +311,10 @@ export async function importSessionPackage(loaded, options = {}) {
   // --- Landing ---
   const landingArt = manifest.sessionArt ? uploaded.get(manifest.sessionArt) : null;
   let landing =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`)) ??
+    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`, {
+      folderId: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
+    })) ??
     (await Scene.create({
       name: `${folderName} — Landing`,
       navigation: true,
@@ -240,7 +333,10 @@ export async function importSessionPackage(loaded, options = {}) {
 
   // --- Leftovers (formerly Inbox): catch-all for unplaced NPCs/items ---
   let leftovers =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, `${folderName} — Leftovers`)) ??
+    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, `${folderName} — Leftovers`, {
+      folderId: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } }
+    })) ??
     (await Scene.create({
       name: `${folderName} — Leftovers`,
       navigation: false,
@@ -282,7 +378,10 @@ export async function importSessionPackage(loaded, options = {}) {
     });
     const sceneName = `Battle — ${entry.name}`;
     let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, sceneName)) ??
+      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, sceneName, {
+        folderId: folders.Scene?.id ?? null,
+        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
+      })) ??
       (await Scene.create({
         name: sceneName,
         navigation: true,
