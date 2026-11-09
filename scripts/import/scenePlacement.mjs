@@ -15,17 +15,45 @@ const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
 // Match "Description 1" … "Description 4" on drawing text or name (template exports vary).
 const DESCRIPTION_RE = /^Description\s*([1-4])$/i;
 
-export async function finalizeLocationScene(scene, { description = "", npcs = [] } = {}) {
+export async function finalizeLocationScene(
+  scene,
+  { description = "", poisText = "", npcs = [] } = {}
+) {
   if (!scene) return;
   const npcSlots = listNpcSlots(scene);
   const descriptionSlots = listDescriptionDrawings(scene);
 
-  const usedDescriptionId = await placeDescriptionOnScene(scene, description, descriptionSlots);
+  // Description takes the first box; POIs take a different empty box (usually Description 2).
+  const usedDescriptionIds = new Set();
+  const descriptionId = await placeDescriptionOnScene(scene, description, descriptionSlots, {
+    kind: "description"
+  });
+  if (descriptionId) {
+    usedDescriptionIds.add(descriptionId);
+  }
+
+  let poiCandidates;
+  if (descriptionId) {
+    poiCandidates = descriptionSlots.filter((slot) => slot.id !== descriptionId);
+  } else if (descriptionSlots.length > 1) {
+    // Keep Description 1 reserved for description; use another empty box for POIs.
+    poiCandidates = descriptionSlots.slice(1);
+  } else {
+    poiCandidates = descriptionSlots;
+  }
+  const poiId = await placeDescriptionOnScene(scene, poisText, poiCandidates, {
+    kind: "pois",
+    createIfMissing: Boolean(String(poisText || "").trim()) && descriptionSlots.length === 0
+  });
+  if (poiId) {
+    usedDescriptionIds.add(poiId);
+  }
+
   const usedNpcIds = await placeNpcsOnScene(scene, npcs, npcSlots);
 
   const deleteDrawingIds = descriptionSlots
     .map((d) => d.id)
-    .filter((id) => id !== usedDescriptionId);
+    .filter((id) => !usedDescriptionIds.has(id));
   const deleteTokenIds = npcSlots
     .map((t) => t.id)
     .filter((id) => !usedNpcIds.has(id));
@@ -188,27 +216,35 @@ async function placeEnemyTokensOnScene(scene, enemies, slots) {
   return used;
 }
 
-async function placeDescriptionOnScene(scene, description, candidates) {
+async function placeDescriptionOnScene(
+  scene,
+  description,
+  candidates,
+  { kind = "description", createIfMissing = true } = {}
+) {
   const text = String(description || "").trim();
   if (!text) {
     return null;
   }
   if (!candidates.length) {
-    await scene.createEmbeddedDocuments("Drawing", [
+    if (!createIfMissing) {
+      return null;
+    }
+    const created = await scene.createEmbeddedDocuments("Drawing", [
       {
-        x: 100,
-        y: 100,
+        x: kind === "pois" ? 100 : 100,
+        y: kind === "pois" ? 520 : 100,
         shape: { type: "r", width: 800, height: 400 },
         text,
         hidden: true,
         fontSize: 48,
         strokeWidth: 0,
-        flags: { [FLAG_SCOPE]: { kind: "description", used: true } }
+        flags: { [FLAG_SCOPE]: { kind, used: true } }
       }
     ]);
-    return null;
+    return created?.[0]?.id ?? null;
   }
-  // Prefer Description 1 (already sorted) so placement is deterministic across imports.
+  // Prefer the earliest remaining Description N (already sorted).
   const pick = candidates[0];
   await scene.updateEmbeddedDocuments("Drawing", [
     {
@@ -217,7 +253,7 @@ async function placeDescriptionOnScene(scene, description, candidates) {
       hidden: true,
       flags: {
         ...(pick.flags ?? {}),
-        [FLAG_SCOPE]: { kind: "description", used: true }
+        [FLAG_SCOPE]: { kind, used: true }
       }
     }
   ]);

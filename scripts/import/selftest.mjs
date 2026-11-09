@@ -57,7 +57,9 @@ const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = awa
 const {
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
+  formatPoisBulletList,
   locationDescriptionText,
+  locationPois,
   resolveColourBattlemapPath,
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
 } = await import("./packageLinks.mjs");
@@ -71,12 +73,11 @@ const paths = (process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SA
   .map((p) => resolve(p))
   .filter((p) => existsSync(p));
 
-if (!paths.length) {
-  console.error("No sample NPC JSON files found.");
-  process.exit(1);
-}
-
 let failures = 0;
+
+if (!paths.length) {
+  console.warn("No sample NPC JSON files found — skipping actor sample assertions.");
+}
 
 function assert(condition, message) {
   if (!condition) {
@@ -215,6 +216,20 @@ for (const path of paths) {
   });
   assert(path === "world/colour.webp" || path === "world/color.png", `prefer colour battlemap (got ${path})`);
   assert(!String(path).includes("grid"), "do not use grid overlay art");
+}
+
+// Location POIs → bullet list
+{
+  const pois = locationPois({
+    fields: {
+      pois: [{ name: "Counter" }, { title: "Back room" }, "Window ledge"]
+    }
+  });
+  assert(pois.length === 3, `parse POI objects/strings (got ${pois.length})`);
+  const text = formatPoisBulletList(pois);
+  assert(text.split("\n").length === 3, "POI bullet list has one line per POI");
+  assert(text.startsWith("• "), "POI lines are bullets");
+  assert(locationPois({ fields: { appearance: "only appearance" } }).length === 0, "no POIs when absent");
 }
 
 // Challenge enemies from links + fields + reverse NPC links

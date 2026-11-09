@@ -17,7 +17,9 @@ import {
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
   collectNpcLocationIds,
+  formatPoisBulletList,
   locationDescriptionText,
+  locationPois,
   resolveColourBattlemapPath
 } from "./packageLinks.mjs";
 import {
@@ -166,7 +168,7 @@ export async function importSessionPackage(loaded, options = {}) {
 
   /** @type {Map<string, string>} dlce id -> Foundry doc uuid */
   const createdByDlceId = new Map();
-  /** @type {Map<string, { scene: Scene, description: string, npcs: Array<{actor: Actor, entry: object}> }>} */
+  /** @type {Map<string, { scene: Scene, description: string, poisText: string, npcs: Array<{actor: Actor, entry: object}> }>} */
   const locationSceneMeta = new Map();
   /** @type {string[]} */
   const sessionSceneIds = [];
@@ -208,6 +210,7 @@ export async function importSessionPackage(loaded, options = {}) {
     locationSceneMeta.set(entry.id, {
       scene,
       description: locationDescriptionText(raw),
+      poisText: formatPoisBulletList(locationPois(raw)),
       npcs: []
     });
   }
@@ -344,6 +347,7 @@ export async function importSessionPackage(loaded, options = {}) {
   for (const meta of locationSceneMeta.values()) {
     await finalizeLocationScene(meta.scene, {
       description: meta.description,
+      poisText: meta.poisText,
       npcs: meta.npcs
     });
   }

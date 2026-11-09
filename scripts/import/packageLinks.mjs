@@ -267,3 +267,83 @@ export function locationDescriptionText(raw) {
     fields.description || fields.appearance || fields.notes || fields.location_description || ""
   ).trim();
 }
+
+/**
+ * Collect Points of Interest labels from a location document.
+ * Supports several DLCE shapes (array/string/JSON; name|title|label|text objects).
+ *
+ * @returns {string[]}
+ */
+export function locationPois(raw) {
+  const fields = raw?.fields ?? {};
+  const candidates = [
+    fields.pois,
+    fields.poi,
+    fields.points_of_interest,
+    fields.pointsOfInterest,
+    fields.location_pois,
+    fields.locationPois,
+    raw?.pois,
+    raw?.points_of_interest
+  ];
+
+  for (const value of candidates) {
+    const list = normalizePoiList(value);
+    if (list.length) {
+      return list;
+    }
+  }
+  return [];
+}
+
+/**
+ * Format POIs as a plain-text bullet list for a Foundry Description drawing.
+ */
+export function formatPoisBulletList(pois) {
+  const list = (pois ?? []).map((poi) => String(poi ?? "").trim()).filter(Boolean);
+  if (!list.length) {
+    return "";
+  }
+  return list.map((poi) => `• ${poi}`).join("\n");
+}
+
+function normalizePoiList(value) {
+  if (value == null || value === "") {
+    return [];
+  }
+  let parsed = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (_error) {
+      return trimmed
+        .split(/\n+/)
+        .map((line) => line.replace(/^[-*•]\s*/, "").trim())
+        .filter(Boolean);
+    }
+  }
+  if (!Array.isArray(parsed)) {
+    if (parsed && typeof parsed === "object") {
+      parsed = Object.values(parsed);
+    } else {
+      return [];
+    }
+  }
+  return parsed
+    .map((row) => {
+      if (typeof row === "string" || typeof row === "number") {
+        return String(row).trim();
+      }
+      if (!row || typeof row !== "object") {
+        return "";
+      }
+      return String(
+        row.name || row.title || row.label || row.text || row.description || row.poi || ""
+      ).trim();
+    })
+    .filter(Boolean);
+}
