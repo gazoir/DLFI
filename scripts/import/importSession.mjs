@@ -13,6 +13,7 @@ import {
   SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
+import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
   buildNpcLocationsFromLocationLinks,
@@ -23,6 +24,10 @@ import {
   locationPois,
   resolveColourBattlemapPath
 } from "./packageLinks.mjs";
+import {
+  resolveLocationBackground,
+  resolveNpcMedia
+} from "./resolvePackageAsset.mjs";
 import {
   finalizeBattlemapScene,
   finalizeLandingScene,
@@ -262,18 +267,21 @@ export async function importSessionPackage(loaded, options = {}) {
         flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
       }));
 
-    const bg = entry.portrait ? uploaded.get(entry.portrait) : null;
-    const update = {
+    const bg = resolveLocationBackground(entry, uploaded);
+    await scene.update({
       name: dmName,
       navName: "",
       navigation: true,
       folder: folders.Scene?.id ?? null,
       flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
-    };
+    });
     if (bg) {
-      update.background = { src: bg };
+      await applySceneBackground(scene, bg);
+    } else {
+      console.warn(
+        `${MODULE_ID} | no location artwork for ${entry.id} (${entry.name}); tried portrait=${entry.portrait ?? "—"}`
+      );
     }
-    await scene.update(update);
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
 
@@ -306,9 +314,11 @@ export async function importSessionPackage(loaded, options = {}) {
     navName: "",
     navigation: true,
     folder: folders.Scene?.id ?? null,
-    ...(landingArt ? { background: { src: landingArt } } : {}),
     flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
   });
+  if (landingArt) {
+    await applySceneBackground(landing, landingArt);
+  }
   sessionSceneIds.push(landing.id);
   landingScene = landing;
 
@@ -373,13 +383,12 @@ export async function importSessionPackage(loaded, options = {}) {
       navName: "",
       navigation: true,
       folder: folders.Scene?.id ?? null,
-      ...(mapPath ? { background: { src: mapPath } } : {}),
       flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
     });
     if (!mapPath) {
       console.warn(`${MODULE_ID} | no colour battlemap found for ${entry.id} (${entry.name})`);
     } else {
-      console.log(`${MODULE_ID} | battlemap ${entry.name} background → ${mapPath}`);
+      await applySceneBackground(scene, mapPath);
     }
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
@@ -396,8 +405,7 @@ export async function importSessionPackage(loaded, options = {}) {
 
   for (const entry of (manifest.documents ?? []).filter((d) => d.type === "npc")) {
     const raw = readDocument(entry.file) ?? {};
-    const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
-    const token = entry.token ? uploaded.get(entry.token) : null;
+    const { portrait, token } = resolveNpcMedia(entry, uploaded);
     const actorData = buildNpcNpcActorData(raw, entry, {
       portrait,
       token,

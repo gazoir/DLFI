@@ -1,4 +1,4 @@
-import { MODULE_ID, PACKAGE_FORMAT_VERSION, notify } from "../constants.mjs";
+import { MODULE_ID, PACKAGE_FORMAT_VERSIONS, notify } from "../constants.mjs";
 import { normalizePackageFiles, readStoreZip } from "./storeZip.mjs";
 
 /**
@@ -17,9 +17,9 @@ function validateManifest(manifest) {
     throw new Error("manifest.json missing or invalid");
   }
   const version = Number(manifest.packageFormatVersion);
-  if (version !== PACKAGE_FORMAT_VERSION) {
+  if (!PACKAGE_FORMAT_VERSIONS.has(version)) {
     notify(
-      `DLFI: packageFormatVersion ${version} (expected ${PACKAGE_FORMAT_VERSION}). Trying anyway.`,
+      `DLFI: packageFormatVersion ${version} (supported ${[...PACKAGE_FORMAT_VERSIONS].join(", ")}). Trying anyway.`,
       { type: "warning" }
     );
   }

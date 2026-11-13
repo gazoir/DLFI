@@ -66,6 +66,28 @@ const SKILL_MAP = {
   survival: "sur"
 };
 
+/** Default ability for each dnd5e skill key (must be set — empty falls back to DEX). */
+const SKILL_ABILITY = {
+  acr: "dex",
+  ani: "wis",
+  arc: "int",
+  ath: "str",
+  dec: "cha",
+  his: "int",
+  ins: "wis",
+  itm: "cha",
+  inv: "int",
+  med: "wis",
+  nat: "int",
+  prc: "wis",
+  prf: "cha",
+  per: "cha",
+  rel: "int",
+  slt: "dex",
+  ste: "dex",
+  sur: "wis"
+};
+
 /**
  * @param {object} raw DLCE document JSON
  * @param {object} entry Manifest document entry
@@ -81,6 +103,10 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
   const items = embedded?.items
     ? foundry.utils.duplicate(embedded.items)
     : buildItemsFromFields(fields);
+
+  // Always normalise skills/CR after either embedded or field-built system data.
+  // dnd5e defaults empty skill.ability to DEX — set the correct ability explicitly.
+  ensureNpcSkillsAndCr(system, fields);
 
   const name = String(embedded?.name || entry?.name || fields.name || "Unnamed").trim();
   const img = media.portrait || embedded?.img || undefined;
@@ -228,9 +254,8 @@ function buildSystemFromFields(fields) {
   Object.assign(system.attributes.senses, parseSensesString(firstString(fields, ["combat_senses", "senses"])));
 
   const cr = firstNumber(fields, ["combat_cr", "cr", "challenge", "challenge_rating"]);
-  if (cr != null) {
-    system.details.cr = cr;
-  }
+  // Default CR 1 so proficiency bonus resolves for non-combat NPCs.
+  system.details.cr = cr != null ? cr : 1;
 
   const creatureType = firstString(fields, ["combat_creature_type", "creature_type", "creatureType"]);
   if (creatureType) {
@@ -272,9 +297,82 @@ function buildSystemFromFields(fields) {
   }
 
   applySaveProficiencies(system, fields);
-  applySkillProficiencies(system, fields);
+  // Skills + CR normalised in ensureNpcSkillsAndCr after system is chosen.
 
   return system;
+}
+
+/**
+ * Ensure every skill has the correct ability score key, mark listed skills
+ * proficient, and default CR to 1 when unset (so proficiency bonus resolves).
+ * @param {object} system
+ * @param {object} fields
+ */
+export function ensureNpcSkillsAndCr(system, fields = {}) {
+  if (!system || typeof system !== "object") {
+    return;
+  }
+
+  system.details ??= {};
+  if (system.details.cr == null || system.details.cr === "") {
+    system.details.cr = 1;
+  }
+
+  system.skills ??= {};
+  const listed = listedSkillAbbrs(fields);
+
+  // Fix ability on any existing skill entries (embedded actors often omit it → DEX).
+  for (const [abbr, skill] of Object.entries(system.skills)) {
+    if (!skill || typeof skill !== "object") {
+      continue;
+    }
+    const ability =
+      CONFIG?.DND5E?.skills?.[abbr]?.ability || SKILL_ABILITY[abbr] || skill.ability || "int";
+    skill.ability = ability;
+  }
+
+  // Apply listed skills as proficient with correct ability.
+  // If the package lists none, still ensure ability keys exist for known skills
+  // that already have a proficiency value.
+  const targets = listed.length ? listed : Object.keys(system.skills);
+  for (const abbr of targets) {
+    const ability = CONFIG?.DND5E?.skills?.[abbr]?.ability || SKILL_ABILITY[abbr] || "int";
+    const existing = system.skills[abbr] && typeof system.skills[abbr] === "object" ? system.skills[abbr] : {};
+    system.skills[abbr] = {
+      ...existing,
+      value: Math.max(Number(existing.value) || 0, listed.length ? 1 : Number(existing.value) || 0),
+      ability,
+      bonuses: existing.bonuses ?? { check: "", passive: "" }
+    };
+    // User request: assume proficiency for each listed skill.
+    if (listed.length) {
+      system.skills[abbr].value = Math.max(Number(system.skills[abbr].value) || 0, 1);
+    }
+  }
+}
+
+function listedSkillAbbrs(fields) {
+  const skills = fields?.check_skills ?? fields?.combat_skills ?? fields?.skills;
+  if (!skills) {
+    return [];
+  }
+  const list = Array.isArray(skills)
+    ? skills
+    : String(skills)
+        .split(/,|;/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+  const abbrs = [];
+  for (const entry of list) {
+    const raw = String(entry).toLowerCase().trim();
+    // Allow "History +5" / "Insight (proficient)" style tokens.
+    const name = raw.replace(/\s*[\(+].*$/, "").replace(/\s+[+-]?\d+$/, "").trim();
+    const abbr = SKILL_MAP[name] || SKILL_MAP[raw] || (SKILL_ABILITY[raw] ? raw : null);
+    if (abbr && !abbrs.includes(abbr)) {
+      abbrs.push(abbr);
+    }
+  }
+  return abbrs;
 }
 
 export function buildItemsFromFields(fields) {
@@ -690,32 +788,6 @@ function applySaveProficiencies(system, fields) {
     }
   }
 }
-
-function applySkillProficiencies(system, fields) {
-  const skills = fields.check_skills ?? fields.combat_skills ?? fields.skills;
-  if (!skills) {
-    return;
-  }
-  const list = Array.isArray(skills)
-    ? skills
-    : String(skills)
-        .split(/,|;/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-  for (const entry of list) {
-    const abbr = SKILL_MAP[String(entry).toLowerCase().trim()];
-    if (!abbr) {
-      continue;
-    }
-    system.skills[abbr] = {
-      value: 1,
-      ability: abbr === "prc" ? "wis" : undefined,
-      bonuses: { check: "", passive: "" }
-    };
-  }
-}
-
-
 
 function inferReachFeet(attackName, actionsMarkdown) {
   const body = findActionBody(attackName, actionsMarkdown);

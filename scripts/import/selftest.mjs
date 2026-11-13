@@ -49,8 +49,11 @@ globalThis.CONFIG = {
 const {
   buildNpcNpcActorData,
   collectNpcLocationIds,
+  ensureNpcSkillsAndCr,
   parseHitDamageParts
 } = await import("./buildNpcActor.mjs");
+const { resolveLocationBackground, resolveNpcMedia } = await import("./resolvePackageAsset.mjs");
+
 const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = await import(
   "./damageFormula.mjs"
 );
@@ -203,6 +206,64 @@ for (const path of paths) {
   } else {
     console.log("skip: Kira/trader samples not present");
   }
+}
+
+// Skills use correct ability + proficiency; CR defaults to 1
+{
+  const bareen = buildNpcNpcActorData(
+    {
+      fields: {
+        name: "Bareen Muradhgan",
+        check_str: 10,
+        check_dex: 6,
+        check_con: 14,
+        check_int: 15,
+        check_wis: 18,
+        check_cha: 17,
+        check_skills: ["Acrobatics", "Athletics", "Insight", "Medicine", "Stealth"]
+      }
+    },
+    { id: "npc_bareen", name: "Bareen Muradhgan" },
+    {}
+  );
+  assert(bareen.system.details.cr === 1, "default CR is 1 when unset");
+  assert(bareen.system.skills.ath?.ability === "str", "Athletics uses STR");
+  assert(bareen.system.skills.ins?.ability === "wis", "Insight uses WIS");
+  assert(bareen.system.skills.med?.ability === "wis", "Medicine uses WIS");
+  assert(bareen.system.skills.acr?.ability === "dex", "Acrobatics uses DEX");
+  assert(bareen.system.skills.ath?.value >= 1, "Athletics is proficient");
+  assert(bareen.system.skills.med?.value >= 1, "Medicine is proficient");
+
+  // Embedded actor with empty ability must be corrected (dnd5e DEX fallback).
+  const broken = { skills: { his: { value: 1, ability: "" }, inv: { value: 1 } }, details: { cr: null } };
+  ensureNpcSkillsAndCr(broken, { check_skills: "History, Investigation, Religion" });
+  assert(broken.details.cr === 1, "ensureNpcSkillsAndCr defaults CR");
+  assert(broken.skills.his.ability === "int", "History ability repaired to INT");
+  assert(broken.skills.inv.ability === "int", "Investigation ability repaired to INT");
+  assert(broken.skills.rel?.ability === "int" && broken.skills.rel.value >= 1, "Religion proficient + INT");
+}
+
+// Location artwork resolves under assets/location/ (DLCE v2 layout)
+{
+  const uploaded = new Map([
+    [
+      "assets/location/loc_ancient_ruin.webp",
+      "dlfi-imports/pkg/assets/location/loc_ancient_ruin.webp"
+    ]
+  ]);
+  const bg = resolveLocationBackground(
+    { id: "loc_ancient_ruin", name: "Fallen Temple", portrait: "assets/portraits/loc_ancient_ruin.webp" },
+    uploaded
+  );
+  assert(
+    bg === "dlfi-imports/pkg/assets/location/loc_ancient_ruin.webp",
+    `location bg from assets/location (got ${bg})`
+  );
+  const media = resolveNpcMedia(
+    { id: "npc_kira", portrait: "assets/portraits/npc_kira.webp" },
+    new Map([["assets/npc/npc_kira.webp", "world/kira.webp"]])
+  );
+  assert(media.portrait === "world/kira.webp", "NPC portrait falls back to assets/npc/");
 }
 
 // Colour battlemap preference

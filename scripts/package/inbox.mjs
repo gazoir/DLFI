@@ -12,8 +12,7 @@ import {
   deleteDataFile,
   ensureDataFolder,
   normalizeDataPath,
-  sessionInboxFolderName,
-  uploadDataFile
+  sessionInboxFolderName
 } from "./dataFolders.mjs";
 import { browseDataFolder, loadPackageFromZipBytes } from "./readPackage.mjs";
 
@@ -68,20 +67,23 @@ export async function listInboxZipCandidates(inboxPath = setting(SETTING_INBOX))
 
 /**
  * Store a zip into `inbox/{Session Code · Name}/` and prune to the newest N copies.
- * @param {File|Blob} file
+ *
+ * Foundry's FilePicker.upload rejects `.zip` (not in the allowed media extensions).
+ * We therefore do not upload via FilePicker — drop zips into Data/dlce-inbox via the OS,
+ * or use Choose zip… which imports from memory without mirroring.
+ *
+ * @param {File|Blob} _file
  * @param {object} manifest
- * @returns {Promise<string>} Data-relative zip path
+ * @returns {Promise<string|null>}
  */
-export async function storeZipInSessionInbox(file, manifest) {
+export async function storeZipInSessionInbox(_file, manifest) {
   const inbox = await ensureInboxRoot();
   const sessionFolder = sessionInboxFolderName(manifest);
-  const dir = await ensureDataFolder(`${inbox}/${sessionFolder}`);
-  const stamp = String(manifest.exportedAt ?? Date.now()).replace(/[:.]/g, "-");
-  const code = String(manifest.sessionCode || "SESSION").replace(/[^\w.-]+/g, "_");
-  const fileName = `${code}__${stamp}.zip`;
-  const stored = await uploadDataFile(dir, fileName, file, { contentType: "application/zip" });
-  await pruneSessionInboxFolder(dir, INBOX_KEEP_PER_SESSION);
-  return stored;
+  await ensureDataFolder(`${inbox}/${sessionFolder}`);
+  console.warn(
+    `${MODULE_ID} | Foundry disallows uploading .zip via FilePicker. Place zips in Data/${inbox}/${sessionFolder}/ via the OS file system.`
+  );
+  return null;
 }
 
 /**
@@ -109,16 +111,16 @@ export async function pruneSessionInboxFolder(folderPath, keep = INBOX_KEEP_PER_
 }
 
 /**
- * After a local Choose zip…, optionally mirror into the inbox for retention.
+ * After a local Choose zip…, ensure the session inbox folder exists.
+ * Foundry cannot upload .zip through FilePicker — import still proceeds from memory.
  */
 export async function mirrorChosenZipToInbox(file, packageBytes) {
   try {
     const pkg = loadPackageFromZipBytes(packageBytes, file.name);
-    const path = await storeZipInSessionInbox(file, pkg.manifest);
-    console.log(`${MODULE_ID} | mirrored zip to inbox ${path}`);
-    return path;
+    await storeZipInSessionInbox(file, pkg.manifest);
+    return null;
   } catch (error) {
-    console.warn(`${MODULE_ID} | could not mirror zip into inbox`, error);
+    console.warn(`${MODULE_ID} | could not prepare inbox folder for chosen zip`, error);
     return null;
   }
 }

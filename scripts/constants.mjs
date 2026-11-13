@@ -1,7 +1,9 @@
 /** @typedef {import("../schemas/types.js").SessionPackageManifest} SessionPackageManifest */
 
 export const MODULE_ID = "dlfi";
+/** Accepted Session Package format versions (DLCE may bump independently). */
 export const PACKAGE_FORMAT_VERSION = 1;
+export const PACKAGE_FORMAT_VERSIONS = new Set([1, 2]);
 
 /** Data/ folder for DLCE Session Package zips only. */
 export const SETTING_INBOX = "inboxPath";
@@ -32,7 +34,10 @@ export function setSetting(key, value) {
 }
 
 export function notify(message, { permanent = false, type = "info" } = {}) {
-  ui.notifications[type]?.(message, { permanent }) ?? ui.notifications.info(message);
+  const text = String(message ?? "");
+  const level = type === "error" ? "error" : type === "warning" ? "warn" : "log";
+  console[level](`${MODULE_ID} | ${text}`);
+  ui.notifications[type]?.(text, { permanent }) ?? ui.notifications.info(text);
 }
 
 export function sessionFolderName(manifest) {
