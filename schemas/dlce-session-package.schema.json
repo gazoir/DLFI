@@ -18,8 +18,8 @@
   "properties": {
     "packageFormatVersion": {
       "type": "integer",
-      "const": 1,
-      "description": "Bump when DLFI must change how it reads packages."
+      "const": 2,
+      "description": "Bump when DLFI must change how it reads packages. v2 organises primary art under assets/{wdType}/."
     },
     "exportedAt": {
       "type": "string",
@@ -58,11 +58,38 @@
     "assets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["portraits", "tokens", "battlemaps", "session"],
+      "required": [
+        "challenge",
+        "event",
+        "faction",
+        "item",
+        "location",
+        "note",
+        "npc",
+        "secret",
+        "tokens",
+        "battlemaps",
+        "session"
+      ],
       "properties": {
-        "portraits": { "type": "array", "items": { "type": "string" } },
-        "tokens": { "type": "array", "items": { "type": "string" } },
-        "battlemaps": { "type": "array", "items": { "type": "string" } },
+        "challenge": { "type": "array", "items": { "type": "string" } },
+        "event": { "type": "array", "items": { "type": "string" } },
+        "faction": { "type": "array", "items": { "type": "string" } },
+        "item": { "type": "array", "items": { "type": "string" } },
+        "location": { "type": "array", "items": { "type": "string" } },
+        "note": { "type": "array", "items": { "type": "string" } },
+        "npc": { "type": "array", "items": { "type": "string" } },
+        "secret": { "type": "array", "items": { "type": "string" } },
+        "tokens": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Standing/VTT tokens; paths nest under assets/{type}/tokens/"
+        },
+        "battlemaps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Location battle maps under assets/location/battlemaps/"
+        },
         "session": { "type": "array", "items": { "type": "string" } }
       }
     }
@@ -93,9 +120,18 @@
           "description": "Package-relative path under documents/"
         },
         "subtype": { "type": "string" },
-        "portrait": { "type": ["string", "null"] },
-        "token": { "type": ["string", "null"] },
-        "battlemap": { "type": ["string", "null"] },
+        "portrait": {
+          "type": ["string", "null"],
+          "description": "Primary art path under assets/{type}/"
+        },
+        "token": {
+          "type": ["string", "null"],
+          "description": "Token path under assets/{type}/tokens/"
+        },
+        "battlemap": {
+          "type": ["string", "null"],
+          "description": "Battle map path under assets/location/battlemaps/"
+        },
         "locationIds": {
           "type": "array",
           "items": { "type": "string" },
