@@ -4,6 +4,7 @@ import {
   notify,
   sessionKey,
   setSetting,
+  SETTING_IMPORTS,
   SETTING_LIVE_SESSION,
   setting,
   SETTING_TEMPLATE_BATTLEMAP,
@@ -11,14 +12,39 @@ import {
   SETTING_TEMPLATE_LANDING,
   SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
-import { buildNpcNpcActorData, collectNpcLocationIds } from "./buildNpcActor.mjs";
+import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
+import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
+  buildNpcLocationsFromLocationLinks,
+  collectChallengeEnemies,
+  collectNpcLocationIds,
+  formatPoisBulletList,
+  locationDescriptionText,
+  locationPois,
+  resolveColourBattlemapPath
+} from "./packageLinks.mjs";
+import {
+  resolveLocationBackground,
+  resolveNpcMedia
+} from "./resolvePackageAsset.mjs";
+import {
+  finalizeBattlemapScene,
   finalizeLandingScene,
-  finalizeLocationScene,
-  finalizeUtilityScene
+  finalizeLeftoversScene,
+  finalizeLocationScene
 } from "./scenePlacement.mjs";
+import {
+  bundledKindForSetting,
+  createSceneFromBundledTemplate
+} from "./defaultTemplates.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
+import {
+  ensureDataFolder,
+  normalizeDataPath,
+  packageImportRoot,
+  uploadDataFile
+} from "../package/dataFolders.mjs";
 import { resolveScene } from "./resolveDocument.mjs";
 
 function decodeJson(bytes) {
@@ -38,81 +64,103 @@ function padOrder(order) {
 }
 
 /**
- * Upload a package asset into Foundry's world data storage.
+ * Upload a package asset into the DLFI imports tree, preserving the zip-relative path.
+ * e.g. assets/portraits/loc_trader.webp → dlfi-imports/{packageRoot}/assets/portraits/…
  * @param {string} packagePath
  * @param {Uint8Array} bytes
- * @param {string} importKey
+ * @param {string} importsRoot e.g. dlfi-imports/SESSION_014__Name__stamp
  */
-async function uploadAsset(packagePath, bytes, importKey) {
-  const safeKey = importKey.replace(/[^a-zA-Z0-9_-]+/g, "_");
-  const target = `dlfi/${safeKey}/${packagePath.replace(/^\/+/, "")}`;
-  const folder = target.split("/").slice(0, -1).join("/");
-  const name = target.split("/").pop();
-  const blob = new Blob([bytes]);
-  const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+async function uploadAsset(packagePath, bytes, importsRoot) {
+  const relative = String(packagePath || "").replace(/^\/+/, "").replace(/\\/g, "/");
+  const target = `${normalizeDataPath(importsRoot)}/${relative}`;
+  const parts = target.split("/");
+  const name = parts.pop();
+  const folder = parts.join("/");
   try {
-    await FilePicker.upload("data", folder, file, { notify: false });
+    const uploaded = await uploadDataFile(folder, name, bytes);
+    return uploaded || target;
   } catch (error) {
     console.warn(`${MODULE_ID} | upload failed for ${target}`, error);
     return null;
   }
-  return target;
 }
 
-async function duplicateTemplateScene(settingKey, fallbackName) {
+/**
+ * Duplicate a configured template Scene, or fall back to the bundled module template.
+ * @param {string} settingKey
+ * @param {string} fallbackName
+ * @param {{ folderId?: string|null, flags?: object }} [options]
+ */
+async function duplicateTemplateScene(settingKey, fallbackName, options = {}) {
   const raw = String(setting(settingKey) || "").trim();
-  if (!raw) {
-    return null;
-  }
-  const template = await resolveScene(raw);
-  if (!template) {
-    notify(
-      `DLFI: template scene not found for ${fallbackName} (${raw}). Paste a Scene id or UUID like Scene.xxxxxxxxxxxxxxxx.`,
-      { type: "warning" }
-    );
-    return null;
-  }
+  const bundledKind = bundledKindForSetting(settingKey);
 
-  // Prefer Document#clone so embedded drawings/tokens/lights keep structure with fresh ids.
-  if (typeof template.clone === "function") {
-    try {
-      const cloned = await template.clone(
-        {
-          name: fallbackName,
-          navigation: false,
-          navName: "",
-          active: false
-        },
-        { save: true, keepId: false }
+  if (raw) {
+    const template = await resolveScene(raw);
+    if (!template) {
+      notify(
+        `DLFI: template scene not found for ${fallbackName} (${raw}); using bundled default.`,
+        { type: "warning" }
       );
-      if (cloned) {
-        return cloned;
+    } else {
+      // Prefer Document#clone so embedded drawings/tokens/lights keep structure with fresh ids.
+      if (typeof template.clone === "function") {
+        try {
+          const cloned = await template.clone(
+            {
+              name: fallbackName,
+              navigation: false,
+              navName: "",
+              active: false,
+              folder: options.folderId ?? template.folder ?? null,
+              ...(options.flags ? { flags: options.flags } : {})
+            },
+            { save: true, keepId: false }
+          );
+          if (cloned) {
+            return cloned;
+          }
+        } catch (error) {
+          console.warn(`${MODULE_ID} | scene clone failed, falling back to fromCompendium`, error);
+        }
       }
-    } catch (error) {
-      console.warn(`${MODULE_ID} | scene clone failed, falling back to fromCompendium`, error);
+
+      const data =
+        typeof game.scenes.fromCompendium === "function"
+          ? game.scenes.fromCompendium(template, { clearFolder: true })
+          : (() => {
+              const object = template.toObject();
+              delete object._id;
+              return object;
+            })();
+      data.name = fallbackName;
+      data.navigation = false;
+      data.navName = "";
+      data.active = false;
+      data.navOrder = data.navOrder ?? 0;
+      data.folder = options.folderId ?? null;
+      if (options.flags) {
+        data.flags = { ...(data.flags ?? {}), ...options.flags };
+      }
+      return Scene.create(data);
     }
   }
 
-  const data =
-    typeof game.scenes.fromCompendium === "function"
-      ? game.scenes.fromCompendium(template, { clearFolder: true })
-      : (() => {
-          const object = template.toObject();
-          delete object._id;
-          return object;
-        })();
-  data.name = fallbackName;
-  data.navigation = false;
-  data.navName = "";
-  data.active = false;
-  data.navOrder = data.navOrder ?? 0;
-  return Scene.create(data);
+  if (bundledKind) {
+    const created = await createSceneFromBundledTemplate(bundledKind, fallbackName, {
+      folder: options.folderId ?? null,
+      flags: options.flags
+    });
+    if (created) {
+      console.log(`${MODULE_ID} | using bundled ${bundledKind} template for ${fallbackName}`);
+      return created;
+    }
+  }
+  return null;
 }
 
 /**
  * Import a loaded Session Package into the world.
- * v0.1: folders, asset upload, location/landing/battlemap/inbox scenes (from templates when set),
- * actors/items from document JSON (basic), MSD journal, exclusive nav.
  *
  * @param {import("../package/readPackage.mjs").LoadedPackage} loaded
  * @param {{ packCurrentLive?: boolean }} [options]
@@ -132,26 +180,73 @@ export async function importSessionPackage(loaded, options = {}) {
 
   /** @type {Map<string, string>} packagePath -> world data path */
   const uploaded = new Map();
+  const importsBase = String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports";
+  const packageRoot = packageImportRoot(manifest, loaded.sourceLabel);
+  const importsRoot = await ensureDataFolder(`${importsBase}/${packageRoot}`);
+  console.log(`${MODULE_ID} | importing assets into Data/${importsRoot}`);
+
+  // Create parent folders from whatever asset paths the package actually contains
+  // (portraits today; later WD-type folders from DLCE without code changes).
+  const assetFolders = new Set();
+  for (const path of files.keys()) {
+    if (!path.startsWith("assets/")) {
+      continue;
+    }
+    const folder = path.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
+    if (folder) {
+      assetFolders.add(folder);
+    }
+  }
+  for (const sub of assetFolders) {
+    try {
+      await ensureDataFolder(`${importsRoot}/${sub}`);
+    } catch (error) {
+      console.warn(`${MODULE_ID} | precreate ${sub} failed`, error);
+    }
+  }
+
+  let uploadFailures = 0;
   for (const [path, bytes] of files) {
     if (!path.startsWith("assets/")) {
       continue;
     }
-    const worldPath = await uploadAsset(path, bytes, importKey);
+    const worldPath = await uploadAsset(path, bytes, importsRoot);
     if (worldPath) {
       uploaded.set(path, worldPath);
+    } else {
+      uploadFailures += 1;
     }
   }
+  if (uploadFailures) {
+    notify(`DLFI: ${uploadFailures} asset upload(s) failed — check console for paths.`, {
+      type: "warning"
+    });
+  }
+
+  const readDocument = (file) => {
+    if (!file) {
+      return null;
+    }
+    const bytes = files.get(file);
+    if (!bytes) {
+      return null;
+    }
+    try {
+      return decodeJson(bytes);
+    } catch (error) {
+      console.warn(`${MODULE_ID} | failed to parse ${file}`, error);
+      return null;
+    }
+  };
 
   /** @type {Map<string, string>} dlce id -> Foundry doc uuid */
   const createdByDlceId = new Map();
-  /** @type {Map<string, { scene: Scene, description: string, npcs: Array<{actor: Actor, entry: object}> }>} */
+  /** @type {Map<string, { scene: Scene, description: string, poisText: string, npcs: Array<{actor: Actor, entry: object}> }>} */
   const locationSceneMeta = new Map();
   /** @type {string[]} */
   const sessionSceneIds = [];
   let landingScene = null;
-  let inboxScene = null;
-  /** @type {Scene[]} */
-  const battlemapScenes = [];
+  let leftoversScene = null;
 
   // --- Locations as scenes ---
   const locations = (manifest.documents ?? []).filter((entry) => entry.type === "location");
@@ -161,7 +256,10 @@ export async function importSessionPackage(loaded, options = {}) {
     const order = padOrder(entry.msdOrder);
     const dmName = `${order}. ${entry.name}`;
     let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName)) ??
+      (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName, {
+        folderId: folders.Scene?.id ?? null,
+        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+      })) ??
       (await Scene.create({
         name: dmName,
         navigation: true,
@@ -169,35 +267,43 @@ export async function importSessionPackage(loaded, options = {}) {
         flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
       }));
 
-    const bg = entry.portrait ? uploaded.get(entry.portrait) : null;
-    const battle = entry.battlemap ? uploaded.get(entry.battlemap) : null;
-    const update = {
+    const bg = resolveLocationBackground(entry, uploaded);
+    await scene.update({
       name: dmName,
       navName: "",
       navigation: true,
       folder: folders.Scene?.id ?? null,
       flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
-    };
+    });
     if (bg) {
-      update.background = { src: bg };
-    } else if (battle) {
-      update.background = { src: battle };
+      await applySceneBackground(scene, bg);
+    } else {
+      console.warn(
+        `${MODULE_ID} | no location artwork for ${entry.id} (${entry.name}); tried portrait=${entry.portrait ?? "—"}`
+      );
     }
-    await scene.update(update);
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
 
-    const docBytes = files.get(entry.file);
-    const description = docBytes
-      ? String(decodeJson(docBytes)?.fields?.description ?? "").trim()
-      : "";
-    locationSceneMeta.set(entry.id, { scene, description, npcs: [] });
+    const raw = readDocument(entry.file);
+    locationSceneMeta.set(entry.id, {
+      scene,
+      description: locationDescriptionText(raw),
+      poisText: formatPoisBulletList(locationPois(raw)),
+      npcs: []
+    });
   }
+
+  // Reverse index: location "Owned by" / similar links → NPC placement
+  const reverseNpcLocations = buildNpcLocationsFromLocationLinks(locations, readDocument);
 
   // --- Landing ---
   const landingArt = manifest.sessionArt ? uploaded.get(manifest.sessionArt) : null;
   let landing =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`)) ??
+    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`, {
+      folderId: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
+    })) ??
     (await Scene.create({
       name: `${folderName} — Landing`,
       navigation: true,
@@ -208,44 +314,65 @@ export async function importSessionPackage(loaded, options = {}) {
     navName: "",
     navigation: true,
     folder: folders.Scene?.id ?? null,
-    ...(landingArt ? { background: { src: landingArt } } : {}),
     flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
   });
+  if (landingArt) {
+    await applySceneBackground(landing, landingArt);
+  }
   sessionSceneIds.push(landing.id);
   landingScene = landing;
 
-  // --- Per-import Inbox ---
-  let inbox =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, `${folderName} — Inbox`)) ??
+  // --- Leftovers (formerly Inbox): catch-all for unplaced NPCs/items ---
+  let leftovers =
+    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, `${folderName} — Leftovers`, {
+      folderId: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } }
+    })) ??
     (await Scene.create({
-      name: `${folderName} — Inbox`,
+      name: `${folderName} — Leftovers`,
       navigation: false,
       folder: folders.Scene?.id ?? null
     }));
-  await inbox.update({
-    name: `${folderName} — Inbox`,
+  await leftovers.update({
+    name: `${folderName} — Leftovers`,
     navName: "",
     navigation: false,
     folder: folders.Scene?.id ?? null,
-    flags: { [FLAG_SCOPE]: { kind: "inbox", importKey } }
+    flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } }
   });
-  inboxScene = inbox;
+  leftoversScene = leftovers;
+  sessionSceneIds.push(leftovers.id);
 
-  // --- Battlemap scenes for combat challenges ---
+  // --- Battlemap scene shells for combat challenges ---
+  const battlemapAssetPaths = [
+    ...(manifest.assets?.battlemaps ?? []),
+    ...[...uploaded.keys()].filter((path) => /^assets\/battlemaps\//i.test(path))
+  ];
+  /** @type {Array<{ scene: Scene, entry: object, raw: object|null }>} */
+  const battlemapMeta = [];
   const combats = (manifest.documents ?? []).filter((entry) => entry.type === "challenge");
   for (const entry of combats) {
-    const docBytes = files.get(entry.file);
-    const raw = docBytes ? decodeJson(docBytes) : null;
-    const kind = String(raw?.fields?.kind ?? "").toLowerCase();
+    const raw = readDocument(entry.file);
+    const kind = String(raw?.fields?.kind ?? entry.subtype ?? "").toLowerCase();
     if (kind && kind !== "combat") {
       continue;
     }
     const locId = (entry.locationIds ?? [])[0];
-    const locEntry = (manifest.documents ?? []).find((d) => d.id === locId && d.type === "location");
-    const mapPath = locEntry?.battlemap ? uploaded.get(locEntry.battlemap) : null;
+    const locEntry =
+      (manifest.documents ?? []).find((d) => d.id === locId && d.type === "location") ?? null;
+    const mapPath = resolveColourBattlemapPath({
+      entry,
+      raw,
+      locationEntry: locEntry,
+      uploaded,
+      assetPaths: battlemapAssetPaths
+    });
     const sceneName = `Battle — ${entry.name}`;
     let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, sceneName)) ??
+      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, sceneName, {
+        folderId: folders.Scene?.id ?? null,
+        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
+      })) ??
       (await Scene.create({
         name: sceneName,
         navigation: true,
@@ -256,20 +383,29 @@ export async function importSessionPackage(loaded, options = {}) {
       navName: "",
       navigation: true,
       folder: folders.Scene?.id ?? null,
-      ...(mapPath ? { background: { src: mapPath } } : {}),
       flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
     });
+    if (!mapPath) {
+      console.warn(`${MODULE_ID} | no colour battlemap found for ${entry.id} (${entry.name})`);
+    } else {
+      await applySceneBackground(scene, mapPath);
+    }
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
-    battlemapScenes.push(scene);
+    battlemapMeta.push({ scene, entry, raw });
   }
 
   // --- NPCs / monsters as Actors ---
+  /** @type {Map<string, Actor>} */
+  const actorsByDlceId = new Map();
+  /** @type {Set<string>} NPCs placed on a location or battlemap */
+  const placedNpcIds = new Set();
+  /** @type {Array<{ entry: object, raw: object, actor: Actor }>} */
+  const npcRecords = [];
+
   for (const entry of (manifest.documents ?? []).filter((d) => d.type === "npc")) {
-    const docBytes = files.get(entry.file);
-    const raw = docBytes ? decodeJson(docBytes) : {};
-    const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
-    const token = entry.token ? uploaded.get(entry.token) : null;
+    const raw = readDocument(entry.file) ?? {};
+    const { portrait, token } = resolveNpcMedia(entry, uploaded);
     const actorData = buildNpcNpcActorData(raw, entry, {
       portrait,
       token,
@@ -278,21 +414,52 @@ export async function importSessionPackage(loaded, options = {}) {
     });
     const actor = await Actor.create(actorData);
     createdByDlceId.set(entry.id, actor.uuid);
+    actorsByDlceId.set(entry.id, actor);
+    npcRecords.push({ entry, raw, actor });
 
-    for (const locationId of collectNpcLocationIds(entry, raw)) {
+    const locationIds = collectNpcLocationIds(
+      entry,
+      raw,
+      reverseNpcLocations.get(entry.id) ?? []
+    );
+    for (const locationId of locationIds) {
       const meta = locationSceneMeta.get(locationId);
       if (meta) {
         meta.npcs.push({ actor, entry });
+        placedNpcIds.add(entry.id);
       }
     }
   }
 
-  // Bind NPCs into template slots, fill descriptions, remove unused placeholders
+  // Bind NPCs into location template slots, fill descriptions, remove unused placeholders
   for (const meta of locationSceneMeta.values()) {
     await finalizeLocationScene(meta.scene, {
       description: meta.description,
+      poisText: meta.poisText,
       npcs: meta.npcs
     });
+  }
+
+  // Battlemap enemy tokens (unlinked)
+  const npcDocumentsForLinks = npcRecords.map((row) => ({
+    id: row.entry.id,
+    raw: row.raw
+  }));
+  for (const meta of battlemapMeta) {
+    const enemies = collectChallengeEnemies(meta.entry, meta.raw, {
+      npcDocuments: npcDocumentsForLinks
+    })
+      .map(({ npcId, count }) => {
+        const actor = actorsByDlceId.get(npcId);
+        if (!actor) {
+          console.warn(`${MODULE_ID} | battlemap enemy missing actor for ${npcId}`);
+          return null;
+        }
+        placedNpcIds.add(npcId);
+        return { actor, count };
+      })
+      .filter(Boolean);
+    await finalizeBattlemapScene(meta.scene, enemies);
   }
 
   // Landing PC slots (match existing world actors by DDB id then name)
@@ -306,19 +473,14 @@ export async function importSessionPackage(loaded, options = {}) {
   if (landingScene) {
     await finalizeLandingScene(landingScene, matchedPcs);
   }
-  if (inboxScene) {
-    await finalizeUtilityScene(inboxScene);
-  }
-  for (const battleScene of battlemapScenes) {
-    await finalizeUtilityScene(battleScene);
-  }
 
   // --- Items ---
   /** @type {Map<string, string[]>} locationId -> item uuids */
   const itemsByLocation = new Map();
+  /** @type {Array<{ name: string, img?: string, uuid: string, dlceId: string }>} */
+  const leftoverItems = [];
   for (const entry of (manifest.documents ?? []).filter((d) => d.type === "item")) {
-    const docBytes = files.get(entry.file);
-    const raw = docBytes ? decodeJson(docBytes) : {};
+    const raw = readDocument(entry.file) ?? {};
     const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
     const fields = raw?.fields ?? {};
     const item = await Item.create({
@@ -344,11 +506,42 @@ export async function importSessionPackage(loaded, options = {}) {
       }
     });
     createdByDlceId.set(entry.id, item.uuid);
-    for (const locationId of entry.locationIds ?? []) {
-      const list = itemsByLocation.get(locationId) ?? [];
-      list.push(item.uuid);
-      itemsByLocation.set(locationId, list);
+    const locationIds = [
+      ...new Set([
+        ...(entry.locationIds ?? []),
+        ...((raw?.links ?? [])
+          .filter((link) => link?.target_type === "location" && link?.target_id)
+          .map((link) => String(link.target_id)))
+      ])
+    ];
+    if (locationIds.length) {
+      for (const locationId of locationIds) {
+        const list = itemsByLocation.get(locationId) ?? [];
+        list.push(item.uuid);
+        itemsByLocation.set(locationId, list);
+      }
+    } else {
+      leftoverItems.push({
+        name: entry.name,
+        img: item.img || portrait || undefined,
+        uuid: item.uuid,
+        dlceId: entry.id
+      });
     }
+  }
+
+  // Leftovers: NPCs not on any location/battlemap + items without a location
+  const leftoverNpcs = npcRecords
+    .filter((row) => !placedNpcIds.has(row.entry.id))
+    .map((row) => ({ actor: row.actor, entry: row.entry }));
+  if (leftoversScene) {
+    await finalizeLeftoversScene(leftoversScene, {
+      npcs: leftoverNpcs,
+      itemNotes: leftoverItems
+    });
+    console.log(
+      `${MODULE_ID} | Leftovers: ${leftoverNpcs.length} NPCs, ${leftoverItems.length} items`
+    );
   }
 
   // --- Items-by-location Journal ---
@@ -401,7 +594,7 @@ export async function importSessionPackage(loaded, options = {}) {
   await setSetting(SETTING_LIVE_SESSION, sessionKey(manifest));
 
   notify(
-    `Imported ${folderName}: ${locations.length} locations, actors/items created, Landing active.`,
+    `Imported ${folderName}: ${locations.length} locations, ${battlemapMeta.length} battlemaps, actors/items created, Landing active.`,
     { type: "info" }
   );
 
@@ -409,7 +602,8 @@ export async function importSessionPackage(loaded, options = {}) {
     importKey,
     folderName,
     sceneIds: sessionSceneIds,
-    landingId: landing?.id ?? null
+    landingId: landing?.id ?? null,
+    leftoversId: leftoversScene?.id ?? null
   };
 }
 

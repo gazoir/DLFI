@@ -4,31 +4,46 @@
  */
 
 import {
+  DEFAULT_IMPORTS_PATH,
+  DEFAULT_INBOX_PATH,
   MODULE_ID,
   PACKAGE_FORMAT_VERSION,
+  SETTING_IMPORTS,
   SETTING_INBOX,
   SETTING_LIVE_SESSION,
   SETTING_SPELL_PACKS,
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
   SETTING_TEMPLATE_LANDING,
-  SETTING_TEMPLATE_LOCATION
+  SETTING_TEMPLATE_LOCATION,
+  setting
 } from "./constants.mjs";
+import { ensureDataFolder } from "./package/dataFolders.mjs";
+import { ensureInboxRoot } from "./package/inbox.mjs";
 import { openDamnedLuckyApp } from "./ui/DamnedLuckyApp.mjs";
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, SETTING_INBOX, {
-    name: "Session Package inbox path",
-    hint: "Folder under Foundry Data where DLCE zips/folders land (relative to Data/).",
+    name: "DLCE Session Package inbox path",
+    hint: "Data/ folder for DLCE zip packages only (nested as Session Code · Session Name). Created automatically if missing. Prefer Browse… in the Damned Lucky Import tab.",
     scope: "world",
     config: true,
     type: String,
-    default: "dlce-inbox"
+    default: DEFAULT_INBOX_PATH
+  });
+
+  game.settings.register(MODULE_ID, SETTING_IMPORTS, {
+    name: "DLFI imports path",
+    hint: "Data/ folder for imported package trees (mirrors the zip layout under assets/). Separate from the DLCE inbox.",
+    scope: "world",
+    config: true,
+    type: String,
+    default: DEFAULT_IMPORTS_PATH
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_LOCATION, {
     name: "Location scene template (id or UUID)",
-    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx). Used when creating location scenes.",
+    hint: "Optional. Paste a Scene id or UUID. Leave blank to use the bundled Expo Scene Template.",
     scope: "world",
     config: true,
     type: String,
@@ -37,7 +52,7 @@ Hooks.once("init", () => {
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_BATTLEMAP, {
     name: "Battlemap scene template (id or UUID)",
-    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx).",
+    hint: "Optional. Paste a Scene id or UUID. Leave blank to use the bundled Battlemap Template.",
     scope: "world",
     config: true,
     type: String,
@@ -46,7 +61,7 @@ Hooks.once("init", () => {
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_LANDING, {
     name: "Landing page scene template (id or UUID)",
-    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx).",
+    hint: "Optional. Paste a Scene id or UUID. Leave blank to use the bundled Landing Page Template.",
     scope: "world",
     config: true,
     type: String,
@@ -54,8 +69,8 @@ Hooks.once("init", () => {
   });
 
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_INBOX, {
-    name: "Inbox scene template (id or UUID)",
-    hint: "Paste a Scene id or UUID (Scene.xxxxxxxxxxxxxxxx) for the per-import Inbox scene.",
+    name: "Leftovers scene template (id or UUID)",
+    hint: "Optional. Paste a Scene id or UUID. Leave blank to use the bundled Leftovers template.",
     scope: "world",
     config: true,
     type: String,
@@ -93,6 +108,18 @@ Hooks.once("ready", () => {
   console.log(
     `${MODULE_ID} | ready (packageFormatVersion ${PACKAGE_FORMAT_VERSION}). Open Damned Lucky from scene controls or Configure Settings.`
   );
+  // Create storage roots so Refresh / Import do not fail on a missing folder.
+  void (async () => {
+    try {
+      await ensureInboxRoot(setting(SETTING_INBOX) || DEFAULT_INBOX_PATH);
+      await ensureDataFolder(setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH);
+      console.log(
+        `${MODULE_ID} | storage ready — inbox Data/${setting(SETTING_INBOX) || DEFAULT_INBOX_PATH}, imports Data/${setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH}`
+      );
+    } catch (error) {
+      console.warn(`${MODULE_ID} | could not pre-create storage folders`, error);
+    }
+  })();
 });
 
 Hooks.on("getSceneControlButtons", (controls) => {

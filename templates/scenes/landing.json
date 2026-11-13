@@ -1,0 +1,771 @@
+{
+  "name": "Landing Page Template",
+  "navigation": false,
+  "navOrder": 0,
+  "background": {
+    "src": null,
+    "anchorX": 0,
+    "anchorY": 0,
+    "offsetX": 0,
+    "offsetY": 0,
+    "fit": "fill",
+    "scaleX": 1,
+    "scaleY": 1,
+    "rotation": 0,
+    "tint": "#ffffff",
+    "alphaThreshold": 0
+  },
+  "foreground": null,
+  "foregroundElevation": null,
+  "thumb": null,
+  "width": 1920,
+  "height": 1080,
+  "padding": 0.25,
+  "initial": {
+    "x": null,
+    "y": null,
+    "scale": null
+  },
+  "backgroundColor": "#171717",
+  "grid": {
+    "type": 1,
+    "size": 200,
+    "style": "solidLines",
+    "thickness": 1,
+    "color": "#000000",
+    "alpha": 0,
+    "distance": 5,
+    "units": "ft"
+  },
+  "tokenVision": false,
+  "fog": {
+    "exploration": false,
+    "overlay": null,
+    "colors": {
+      "explored": null,
+      "unexplored": null
+    }
+  },
+  "environment": {
+    "darknessLevel": 0,
+    "darknessLock": false,
+    "globalLight": {
+      "enabled": true,
+      "alpha": 0.5,
+      "bright": false,
+      "color": null,
+      "coloration": 1,
+      "luminosity": 0,
+      "saturation": 0,
+      "contrast": 0,
+      "shadows": 0,
+      "darkness": {
+        "min": 0,
+        "max": 1
+      }
+    },
+    "cycle": true,
+    "base": {
+      "hue": 0,
+      "intensity": 0,
+      "luminosity": 0,
+      "saturation": 0,
+      "shadows": 0
+    },
+    "dark": {
+      "hue": 0.7138888888888889,
+      "intensity": 0,
+      "luminosity": -0.25,
+      "saturation": 0,
+      "shadows": 0
+    }
+  },
+  "drawings": [],
+  "tokens": [
+    {
+      "name": "3A1",
+      "displayName": 50,
+      "actorLink": false,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "systems/dnd5e/icons/svg/actors/npc.svg",
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "fit": "contain",
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75
+      },
+      "lockRotation": true,
+      "rotation": 268.9190758133393,
+      "alpha": 1,
+      "disposition": -1,
+      "displayBars": 0,
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {
+        "attribute": null
+      },
+      "light": {
+        "negative": false,
+        "priority": 0,
+        "alpha": 0.5,
+        "angle": 360,
+        "bright": 0,
+        "color": null,
+        "coloration": 1,
+        "dim": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "animation": {
+          "type": null,
+          "speed": 5,
+          "intensity": 5,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "sight": {
+        "enabled": false,
+        "range": 0,
+        "angle": 360,
+        "visionMode": "basic",
+        "color": null,
+        "attenuation": 0.1,
+        "brightness": 0,
+        "saturation": 0,
+        "contrast": 0
+      },
+      "detectionModes": [],
+      "occludable": {
+        "radius": 0
+      },
+      "ring": {
+        "enabled": false,
+        "colors": {
+          "ring": null,
+          "background": null
+        },
+        "effects": 0,
+        "subject": {
+          "scale": 1,
+          "texture": null
+        }
+      },
+      "turnMarker": {
+        "mode": 1,
+        "animation": null,
+        "src": null,
+        "disposition": false
+      },
+      "movementAction": null,
+      "flags": {},
+      "actorId": null,
+      "hidden": false,
+      "sort": 0,
+      "shape": 4,
+      "delta": {
+        "_id": "C01rsjKlpOFE8KWo",
+        "system": {},
+        "items": [],
+        "effects": [],
+        "flags": {},
+        "name": null,
+        "type": null,
+        "img": null
+      },
+      "x": 1125,
+      "y": 803,
+      "elevation": 0,
+      "locked": false,
+      "_movementHistory": [],
+      "_regions": []
+    },
+    {
+      "name": "1A1",
+      "displayName": 50,
+      "actorLink": false,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "systems/dnd5e/icons/svg/actors/npc.svg",
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "fit": "contain",
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75
+      },
+      "lockRotation": true,
+      "rotation": 268.9190758133393,
+      "alpha": 1,
+      "disposition": -1,
+      "displayBars": 0,
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {
+        "attribute": null
+      },
+      "light": {
+        "negative": false,
+        "priority": 0,
+        "alpha": 0.5,
+        "angle": 360,
+        "bright": 0,
+        "color": null,
+        "coloration": 1,
+        "dim": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "animation": {
+          "type": null,
+          "speed": 5,
+          "intensity": 5,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "sight": {
+        "enabled": false,
+        "range": 0,
+        "angle": 360,
+        "visionMode": "basic",
+        "color": null,
+        "attenuation": 0.1,
+        "brightness": 0,
+        "saturation": 0,
+        "contrast": 0
+      },
+      "detectionModes": [],
+      "occludable": {
+        "radius": 0
+      },
+      "ring": {
+        "enabled": false,
+        "colors": {
+          "ring": null,
+          "background": null
+        },
+        "effects": 0,
+        "subject": {
+          "scale": 1,
+          "texture": null
+        }
+      },
+      "turnMarker": {
+        "mode": 1,
+        "animation": null,
+        "src": null,
+        "disposition": false
+      },
+      "movementAction": null,
+      "flags": {},
+      "actorId": null,
+      "hidden": false,
+      "sort": 0,
+      "shape": 4,
+      "delta": {
+        "_id": "C01rsjKlpOFE8KWo",
+        "system": {},
+        "items": [],
+        "effects": [],
+        "flags": {},
+        "name": null,
+        "type": null,
+        "img": null
+      },
+      "x": 1453,
+      "y": 799,
+      "elevation": 0,
+      "locked": false,
+      "_movementHistory": [],
+      "_regions": []
+    },
+    {
+      "name": "2A2",
+      "displayName": 50,
+      "actorLink": false,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "systems/dnd5e/icons/svg/actors/npc.svg",
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "fit": "contain",
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75
+      },
+      "lockRotation": true,
+      "rotation": 268.9190758133393,
+      "alpha": 1,
+      "disposition": -1,
+      "displayBars": 0,
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {
+        "attribute": null
+      },
+      "light": {
+        "negative": false,
+        "priority": 0,
+        "alpha": 0.5,
+        "angle": 360,
+        "bright": 0,
+        "color": null,
+        "coloration": 1,
+        "dim": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "animation": {
+          "type": null,
+          "speed": 5,
+          "intensity": 5,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "sight": {
+        "enabled": false,
+        "range": 0,
+        "angle": 360,
+        "visionMode": "basic",
+        "color": null,
+        "attenuation": 0.1,
+        "brightness": 0,
+        "saturation": 0,
+        "contrast": 0
+      },
+      "detectionModes": [],
+      "occludable": {
+        "radius": 0
+      },
+      "ring": {
+        "enabled": false,
+        "colors": {
+          "ring": null,
+          "background": null
+        },
+        "effects": 0,
+        "subject": {
+          "scale": 1,
+          "texture": null
+        }
+      },
+      "turnMarker": {
+        "mode": 1,
+        "animation": null,
+        "src": null,
+        "disposition": false
+      },
+      "movementAction": null,
+      "flags": {},
+      "actorId": null,
+      "hidden": false,
+      "sort": 0,
+      "shape": 4,
+      "delta": {
+        "_id": "C01rsjKlpOFE8KWo",
+        "system": {},
+        "items": [],
+        "effects": [],
+        "flags": {},
+        "name": null,
+        "type": null,
+        "img": null
+      },
+      "x": 1653,
+      "y": 799,
+      "elevation": 0,
+      "locked": false,
+      "_movementHistory": [],
+      "_regions": []
+    },
+    {
+      "name": "2A1",
+      "displayName": 50,
+      "actorLink": false,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "systems/dnd5e/icons/svg/actors/npc.svg",
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "fit": "contain",
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75
+      },
+      "lockRotation": true,
+      "rotation": 268.9190758133393,
+      "alpha": 1,
+      "disposition": -1,
+      "displayBars": 0,
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {
+        "attribute": null
+      },
+      "light": {
+        "negative": false,
+        "priority": 0,
+        "alpha": 0.5,
+        "angle": 360,
+        "bright": 0,
+        "color": null,
+        "coloration": 1,
+        "dim": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "animation": {
+          "type": null,
+          "speed": 5,
+          "intensity": 5,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "sight": {
+        "enabled": false,
+        "range": 0,
+        "angle": 360,
+        "visionMode": "basic",
+        "color": null,
+        "attenuation": 0.1,
+        "brightness": 0,
+        "saturation": 0,
+        "contrast": 0
+      },
+      "detectionModes": [],
+      "occludable": {
+        "radius": 0
+      },
+      "ring": {
+        "enabled": false,
+        "colors": {
+          "ring": null,
+          "background": null
+        },
+        "effects": 0,
+        "subject": {
+          "scale": 1,
+          "texture": null
+        }
+      },
+      "turnMarker": {
+        "mode": 1,
+        "animation": null,
+        "src": null,
+        "disposition": false
+      },
+      "movementAction": null,
+      "flags": {},
+      "actorId": null,
+      "hidden": false,
+      "sort": 0,
+      "shape": 4,
+      "delta": {
+        "_id": "C01rsjKlpOFE8KWo",
+        "system": {},
+        "items": [],
+        "effects": [],
+        "flags": {},
+        "name": null,
+        "type": null,
+        "img": null
+      },
+      "x": 1253,
+      "y": 799,
+      "elevation": 0,
+      "locked": false,
+      "_movementHistory": [],
+      "_regions": []
+    },
+    {
+      "name": "3A3",
+      "displayName": 50,
+      "actorLink": false,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "systems/dnd5e/icons/svg/actors/npc.svg",
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "fit": "contain",
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75
+      },
+      "lockRotation": true,
+      "rotation": 268.9190758133393,
+      "alpha": 1,
+      "disposition": -1,
+      "displayBars": 0,
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {
+        "attribute": null
+      },
+      "light": {
+        "negative": false,
+        "priority": 0,
+        "alpha": 0.5,
+        "angle": 360,
+        "bright": 0,
+        "color": null,
+        "coloration": 1,
+        "dim": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "animation": {
+          "type": null,
+          "speed": 5,
+          "intensity": 5,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "sight": {
+        "enabled": false,
+        "range": 0,
+        "angle": 360,
+        "visionMode": "basic",
+        "color": null,
+        "attenuation": 0.1,
+        "brightness": 0,
+        "saturation": 0,
+        "contrast": 0
+      },
+      "detectionModes": [],
+      "occludable": {
+        "radius": 0
+      },
+      "ring": {
+        "enabled": false,
+        "colors": {
+          "ring": null,
+          "background": null
+        },
+        "effects": 0,
+        "subject": {
+          "scale": 1,
+          "texture": null
+        }
+      },
+      "turnMarker": {
+        "mode": 1,
+        "animation": null,
+        "src": null,
+        "disposition": false
+      },
+      "movementAction": null,
+      "flags": {},
+      "actorId": null,
+      "hidden": false,
+      "sort": 0,
+      "shape": 4,
+      "delta": {
+        "_id": "C01rsjKlpOFE8KWo",
+        "system": {},
+        "items": [],
+        "effects": [],
+        "flags": {},
+        "name": null,
+        "type": null,
+        "img": null
+      },
+      "x": 1734,
+      "y": 800,
+      "elevation": 0,
+      "locked": false,
+      "_movementHistory": [],
+      "_regions": []
+    },
+    {
+      "name": "3A2",
+      "displayName": 50,
+      "actorLink": false,
+      "width": 1,
+      "height": 1,
+      "texture": {
+        "src": "systems/dnd5e/icons/svg/actors/npc.svg",
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "offsetX": 0,
+        "offsetY": 0,
+        "fit": "contain",
+        "scaleX": 1,
+        "scaleY": 1,
+        "rotation": 0,
+        "tint": "#ffffff",
+        "alphaThreshold": 0.75
+      },
+      "lockRotation": true,
+      "rotation": 268.9190758133393,
+      "alpha": 1,
+      "disposition": -1,
+      "displayBars": 0,
+      "bar1": {
+        "attribute": "attributes.hp"
+      },
+      "bar2": {
+        "attribute": null
+      },
+      "light": {
+        "negative": false,
+        "priority": 0,
+        "alpha": 0.5,
+        "angle": 360,
+        "bright": 0,
+        "color": null,
+        "coloration": 1,
+        "dim": 0,
+        "attenuation": 0.5,
+        "luminosity": 0.5,
+        "saturation": 0,
+        "contrast": 0,
+        "shadows": 0,
+        "animation": {
+          "type": null,
+          "speed": 5,
+          "intensity": 5,
+          "reverse": false
+        },
+        "darkness": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "sight": {
+        "enabled": false,
+        "range": 0,
+        "angle": 360,
+        "visionMode": "basic",
+        "color": null,
+        "attenuation": 0.1,
+        "brightness": 0,
+        "saturation": 0,
+        "contrast": 0
+      },
+      "detectionModes": [],
+      "occludable": {
+        "radius": 0
+      },
+      "ring": {
+        "enabled": false,
+        "colors": {
+          "ring": null,
+          "background": null
+        },
+        "effects": 0,
+        "subject": {
+          "scale": 1,
+          "texture": null
+        }
+      },
+      "turnMarker": {
+        "mode": 1,
+        "animation": null,
+        "src": null,
+        "disposition": false
+      },
+      "movementAction": null,
+      "flags": {},
+      "actorId": null,
+      "hidden": false,
+      "sort": 0,
+      "shape": 4,
+      "delta": {
+        "_id": "C01rsjKlpOFE8KWo",
+        "system": {},
+        "items": [],
+        "effects": [],
+        "flags": {},
+        "name": null,
+        "type": null,
+        "img": null
+      },
+      "x": 1453,
+      "y": 799,
+      "elevation": 0,
+      "locked": false,
+      "_movementHistory": [],
+      "_regions": []
+    }
+  ],
+  "lights": [],
+  "notes": [],
+  "sounds": [],
+  "regions": [],
+  "templates": [],
+  "tiles": [],
+  "walls": [],
+  "playlist": null,
+  "playlistSound": null,
+  "journal": null,
+  "journalEntryPage": null,
+  "weather": "",
+  "flags": {
+    "dlfi": {
+      "bundledTemplate": "landing"
+    }
+  },
+  "navName": "",
+  "active": false
+}
