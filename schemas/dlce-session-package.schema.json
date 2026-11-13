@@ -41,7 +41,30 @@
     },
     "sessionArt": {
       "type": ["string", "null"],
-      "description": "Package-relative path under assets/session/"
+      "description": "Legacy single session/landing image path (prefer landingPage.logoBurn)."
+    },
+    "landingPage": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Session artwork slides under Landing Page/ (or assets/Landing Page/).",
+      "properties": {
+        "clean": {
+          "type": ["string", "null"],
+          "description": "Raw session image (no logo/title)."
+        },
+        "logoBurn": {
+          "type": ["string", "null"],
+          "description": "Logo + title burned into the session image; DLFI uses this as the Landing scene background."
+        },
+        "logoOnly": {
+          "type": ["string", "null"],
+          "description": "Full 16:9 logo on transparency for dropping onto scenes."
+        },
+        "titleOnly": {
+          "type": ["string", "null"],
+          "description": "Full 16:9 title on transparency for dropping onto scenes."
+        }
+      }
     },
     "msd": {
       "type": ["string", "null"],
@@ -63,7 +86,12 @@
         "portraits": { "type": "array", "items": { "type": "string" } },
         "tokens": { "type": "array", "items": { "type": "string" } },
         "battlemaps": { "type": "array", "items": { "type": "string" } },
-        "session": { "type": "array", "items": { "type": "string" } }
+        "session": { "type": "array", "items": { "type": "string" } },
+        "landingPage": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Paths under Landing Page/ (Clean, Logo_Burn, Logo_Only, Title_Only)."
+        }
       }
     }
   },

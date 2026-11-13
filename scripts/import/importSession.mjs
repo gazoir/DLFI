@@ -29,6 +29,10 @@ import {
   resolveNpcMedia
 } from "./resolvePackageAsset.mjs";
 import {
+  resolveLandingPageArt,
+  shouldUploadPackagePath
+} from "./resolveLandingArt.mjs";
+import {
   finalizeBattlemapScene,
   finalizeLandingScene,
   finalizeLeftoversScene,
@@ -185,11 +189,11 @@ export async function importSessionPackage(loaded, options = {}) {
   const importsRoot = await ensureDataFolder(`${importsBase}/${packageRoot}`);
   console.log(`${MODULE_ID} | importing assets into Data/${importsRoot}`);
 
-  // Create parent folders from whatever asset paths the package actually contains
-  // (portraits today; later WD-type folders from DLCE without code changes).
+  // Create parent folders from whatever uploadable paths the package contains
+  // (assets/** plus top-level Landing Page/** slides from DLCE).
   const assetFolders = new Set();
   for (const path of files.keys()) {
-    if (!path.startsWith("assets/")) {
+    if (!shouldUploadPackagePath(path)) {
       continue;
     }
     const folder = path.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
@@ -207,7 +211,7 @@ export async function importSessionPackage(loaded, options = {}) {
 
   let uploadFailures = 0;
   for (const [path, bytes] of files) {
-    if (!path.startsWith("assets/")) {
+    if (!shouldUploadPackagePath(path)) {
       continue;
     }
     const worldPath = await uploadAsset(path, bytes, importsRoot);
@@ -298,7 +302,8 @@ export async function importSessionPackage(loaded, options = {}) {
   const reverseNpcLocations = buildNpcLocationsFromLocationLinks(locations, readDocument);
 
   // --- Landing ---
-  const landingArt = manifest.sessionArt ? uploaded.get(manifest.sessionArt) : null;
+  // Prefer Logo_Burn from Landing Page/; keep Clean / Logo Only / Title Only on disk.
+  const landingArt = resolveLandingPageArt(manifest, uploaded);
   let landing =
     (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`, {
       folderId: folders.Scene?.id ?? null,
@@ -314,10 +319,40 @@ export async function importSessionPackage(loaded, options = {}) {
     navName: "",
     navigation: true,
     folder: folders.Scene?.id ?? null,
-    flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
+    flags: {
+      [FLAG_SCOPE]: {
+        kind: "landing",
+        importKey,
+        landingArt: {
+          background: landingArt.background,
+          logoBurn: landingArt.logoBurn,
+          logoOnly: landingArt.logoOnly,
+          titleOnly: landingArt.titleOnly,
+          clean: landingArt.clean,
+          packagePaths: landingArt.packagePaths
+        }
+      }
+    }
   });
-  if (landingArt) {
-    await applySceneBackground(landing, landingArt);
+  if (landingArt.background) {
+    await applySceneBackground(landing, landingArt.background);
+    console.log(
+      `${MODULE_ID} | Landing background → ${landingArt.background}` +
+        (landingArt.logoBurn ? " (Logo_Burn)" : landingArt.clean ? " (Clean/sessionArt)" : "")
+    );
+  } else {
+    console.warn(`${MODULE_ID} | no Landing Page / session art found for Landing background`);
+  }
+  if (landingArt.logoOnly || landingArt.titleOnly || landingArt.clean) {
+    console.log(
+      `${MODULE_ID} | Landing Page slides available:`,
+      {
+        clean: landingArt.clean,
+        logoBurn: landingArt.logoBurn,
+        logoOnly: landingArt.logoOnly,
+        titleOnly: landingArt.titleOnly
+      }
+    );
   }
   sessionSceneIds.push(landing.id);
   landingScene = landing;

@@ -53,6 +53,11 @@ const {
   parseHitDamageParts
 } = await import("./buildNpcActor.mjs");
 const { resolveLocationBackground, resolveNpcMedia } = await import("./resolvePackageAsset.mjs");
+const {
+  classifyLandingFileName,
+  resolveLandingPageArt,
+  shouldUploadPackagePath
+} = await import("./resolveLandingArt.mjs");
 
 const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = await import(
   "./damageFormula.mjs"
@@ -241,6 +246,53 @@ for (const path of paths) {
   assert(broken.skills.his.ability === "int", "History ability repaired to INT");
   assert(broken.skills.inv.ability === "int", "Investigation ability repaired to INT");
   assert(broken.skills.rel?.ability === "int" && broken.skills.rel.value >= 1, "Religion proficient + INT");
+}
+
+// Landing Page slides: Logo_Burn for background; upload Landing Page/ folder
+{
+  assert(classifyLandingFileName("SESSION_014_Logo_Burn.webp") === "logoBurn", "classify Logo_Burn");
+  assert(classifyLandingFileName("Mist_Opportunity_Logo Only.png") === "logoOnly", "classify Logo Only");
+  assert(classifyLandingFileName("title-only.webp") === "titleOnly", "classify title-only");
+  assert(classifyLandingFileName("session_Clean.jpg") === "clean", "classify Clean");
+  assert(shouldUploadPackagePath("Landing Page/x_Logo_Burn.webp"), "upload top-level Landing Page/");
+  assert(shouldUploadPackagePath("assets/npc/foo.webp"), "upload assets/");
+  assert(!shouldUploadPackagePath("documents/npc_kira.json"), "skip documents/");
+
+  const uploaded = new Map([
+    ["Landing Page/SESSION_Logo_Burn.webp", "world/Landing Page/SESSION_Logo_Burn.webp"],
+    ["Landing Page/SESSION_Clean.webp", "world/Landing Page/SESSION_Clean.webp"],
+    ["Landing Page/SESSION_Logo_Only.webp", "world/Landing Page/SESSION_Logo_Only.webp"],
+    ["Landing Page/SESSION_Title_Only.webp", "world/Landing Page/SESSION_Title_Only.webp"],
+    ["assets/session/old.webp", "world/assets/session/old.webp"]
+  ]);
+  const art = resolveLandingPageArt({ sessionArt: "assets/session/old.webp" }, uploaded);
+  assert(
+    art.background === "world/Landing Page/SESSION_Logo_Burn.webp",
+    `Logo_Burn preferred for Landing BG (got ${art.background})`
+  );
+  assert(art.logoOnly?.endsWith("Logo_Only.webp"), "logoOnly resolved");
+  assert(art.titleOnly?.endsWith("Title_Only.webp"), "titleOnly resolved");
+  assert(art.clean?.endsWith("Clean.webp"), "clean resolved");
+
+  const named = resolveLandingPageArt(
+    {
+      landingPage: {
+        logoBurn: "assets/Landing Page/burn.webp",
+        clean: "assets/Landing Page/clean.webp"
+      }
+    },
+    new Map([
+      ["assets/Landing Page/burn.webp", "world/burn.webp"],
+      ["assets/Landing Page/clean.webp", "world/clean.webp"]
+    ])
+  );
+  assert(named.background === "world/burn.webp", "manifest.landingPage.logoBurn wins");
+
+  const legacy = resolveLandingPageArt(
+    { sessionArt: "assets/session/cover.webp" },
+    new Map([["assets/session/cover.webp", "world/cover.webp"]])
+  );
+  assert(legacy.background === "world/cover.webp", "legacy sessionArt still works");
 }
 
 // Location artwork resolves under assets/location/ (DLCE v2 layout)
