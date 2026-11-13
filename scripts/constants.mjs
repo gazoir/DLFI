@@ -1,7 +1,7 @@
 /** @typedef {import("../schemas/types.js").SessionPackageManifest} SessionPackageManifest */
 
 export const MODULE_ID = "dlfi";
-export const PACKAGE_FORMAT_VERSION = 1;
+export const PACKAGE_FORMAT_VERSION = 2;
 
 export const SETTING_INBOX = "inboxPath";
 export const SETTING_TEMPLATE_LOCATION = "templateLocation";

@@ -31,4 +31,6 @@ Still stubbed: Pack-to-Archive, Sessions activate/bulk-delete, spell-pack lookup
 
 ## Package contract
 
-`schemas/dlce-session-package.schema.json` mirrors DLCE. `packageFormatVersion` must be `1`.
+`schemas/dlce-session-package.schema.json` mirrors DLCE. `packageFormatVersion` must be `2`.
+
+v2 primary art lives under `assets/{wdType}/` (npc, location, item, …), tokens under `assets/{wdType}/tokens/`, battle maps under `assets/location/battlemaps/`. Document `portrait` / `token` / `battlemap` fields hold concrete package-relative paths — prefer those over folder assumptions.
