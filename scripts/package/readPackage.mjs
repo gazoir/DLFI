@@ -70,35 +70,14 @@ export async function browseDataFolder(dataPath) {
 }
 
 /**
- * Scan inbox for package folders (containing manifest.json) and .zip files.
+ * Scan the DLCE inbox for Session Package zips (nested under Session Code · Name).
+ * Creates the inbox root if missing. Unpacked folders are ignored — inbox is zip-only.
  * @param {string} inboxPath
- * @returns {Promise<Array<{ kind: "folder"|"zip", path: string, name: string }>>}
+ * @returns {Promise<Array<{ kind: "zip", path: string, name: string, sessionFolder?: string|null }>>}
  */
 export async function listInboxCandidates(inboxPath) {
-  const browse = await browseDataFolder(inboxPath);
-  const candidates = [];
-
-  for (const file of browse.files ?? []) {
-    if (/\.zip$/i.test(file)) {
-      const name = file.split("/").pop() ?? file;
-      candidates.push({ kind: "zip", path: file, name });
-    }
-  }
-
-  for (const dir of browse.dirs ?? []) {
-    try {
-      const inner = await browseDataFolder(dir);
-      const hasManifest = (inner.files ?? []).some((file) => file.endsWith("/manifest.json") || file.endsWith("manifest.json"));
-      if (hasManifest) {
-        const name = dir.split("/").pop() ?? dir;
-        candidates.push({ kind: "folder", path: dir, name });
-      }
-    } catch (error) {
-      console.warn(`${MODULE_ID} | skip inbox dir ${dir}`, error);
-    }
-  }
-
-  return candidates.sort((a, b) => a.name.localeCompare(b.name));
+  const { listInboxZipCandidates } = await import("./inbox.mjs");
+  return listInboxZipCandidates(inboxPath);
 }
 
 /**

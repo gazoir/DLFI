@@ -63,6 +63,11 @@ const {
   resolveColourBattlemapPath,
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
 } = await import("./packageLinks.mjs");
+const {
+  packageImportRoot,
+  sessionInboxFolderName,
+  normalizeDataPath
+} = await import("../package/dataFolders.mjs");
 
 const DEFAULT_SAMPLES = [
   "/home/ubuntu/.cursor/projects/workspace/uploads/npc_wyvern_025d.json",
@@ -216,6 +221,26 @@ for (const path of paths) {
   });
   assert(path === "world/colour.webp" || path === "world/color.png", `prefer colour battlemap (got ${path})`);
   assert(!String(path).includes("grid"), "do not use grid overlay art");
+}
+
+// Storage path helpers
+{
+  const manifest = {
+    sessionCode: "SESSION_014",
+    displayCode: "SESSION_014",
+    sessionName: "Misty Lake",
+    exportedAt: "2026-11-09T17:00:06.864Z"
+  };
+  assert(
+    sessionInboxFolderName(manifest) === "SESSION_014 · Misty Lake",
+    `inbox folder name (${sessionInboxFolderName(manifest)})`
+  );
+  const root = packageImportRoot(manifest);
+  assert(root.startsWith("SESSION_014__Misty_Lake__"), `import root (${root})`);
+  assert(
+    normalizeDataPath("\\dlfi-imports\\foo\\") === "dlfi-imports/foo",
+    "normalizeDataPath strips slashes"
+  );
 }
 
 // Location POIs → bullet list

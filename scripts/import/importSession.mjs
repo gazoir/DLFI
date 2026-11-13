@@ -4,6 +4,7 @@ import {
   notify,
   sessionKey,
   setSetting,
+  SETTING_IMPORTS,
   SETTING_LIVE_SESSION,
   setting,
   SETTING_TEMPLATE_BATTLEMAP,
@@ -33,6 +34,12 @@ import {
   createSceneFromBundledTemplate
 } from "./defaultTemplates.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
+import {
+  ensureDataFolder,
+  normalizeDataPath,
+  packageImportRoot,
+  uploadDataFile
+} from "../package/dataFolders.mjs";
 import { resolveScene } from "./resolveDocument.mjs";
 
 function decodeJson(bytes) {
@@ -52,66 +59,24 @@ function padOrder(order) {
 }
 
 /**
- * Ensure a Data/ folder path exists (FilePicker.upload does not create parents).
- * @param {string} folderPath e.g. "dlfi/SESSION_…/assets/portraits"
- */
-async function ensureDataFolder(folderPath) {
-  const normalized = String(folderPath ?? "")
-    .replace(/^\/+/, "")
-    .replace(/\\/g, "/")
-    .replace(/\/+$/, "");
-  if (!normalized) {
-    return;
-  }
-  const parts = normalized.split("/").filter(Boolean);
-  let current = "";
-  for (const part of parts) {
-    current = current ? `${current}/${part}` : part;
-    try {
-      await FilePicker.createDirectory("data", current, { notify: false });
-    } catch (error) {
-      // Directory already exists — Foundry throws variously by version/OS.
-      const message = String(error?.message ?? error ?? "");
-      if (!/exist|EEXIST|already/i.test(message)) {
-        // Browse to confirm; if browse works the folder is fine.
-        try {
-          await FilePicker.browse("data", current);
-        } catch (browseError) {
-          console.warn(`${MODULE_ID} | could not ensure folder ${current}`, error, browseError);
-          throw error;
-        }
-      }
-    }
-  }
-}
-
-/**
- * Upload a package asset into Foundry's world data storage.
+ * Upload a package asset into the DLFI imports tree, preserving the zip-relative path.
+ * e.g. assets/portraits/loc_trader.webp → dlfi-imports/{packageRoot}/assets/portraits/…
  * @param {string} packagePath
  * @param {Uint8Array} bytes
- * @param {string} importKey
+ * @param {string} importsRoot e.g. dlfi-imports/SESSION_014__Name__stamp
  */
-async function uploadAsset(packagePath, bytes, importKey) {
-  const safeKey = importKey.replace(/[^a-zA-Z0-9_-]+/g, "_");
-  const target = `dlfi/${safeKey}/${packagePath.replace(/^\/+/, "")}`;
-  const folder = target.split("/").slice(0, -1).join("/");
-  const name = target.split("/").pop();
-  const blob = new Blob([bytes]);
-  const file = new File([blob], name, { type: blob.type || "application/octet-stream" });
+async function uploadAsset(packagePath, bytes, importsRoot) {
+  const relative = String(packagePath || "").replace(/^\/+/, "").replace(/\\/g, "/");
+  const target = `${normalizeDataPath(importsRoot)}/${relative}`;
+  const parts = target.split("/");
+  const name = parts.pop();
+  const folder = parts.join("/");
   try {
-    await ensureDataFolder(folder);
-    await FilePicker.upload("data", folder, file, {}, { notify: false });
-    return target;
+    const uploaded = await uploadDataFile(folder, name, bytes);
+    return uploaded || target;
   } catch (error) {
-    // Older Foundry signatures: upload(source, path, file, options)
-    try {
-      await ensureDataFolder(folder);
-      await FilePicker.upload("data", folder, file, { notify: false });
-      return target;
-    } catch (retryError) {
-      console.warn(`${MODULE_ID} | upload failed for ${target}`, retryError || error);
-      return null;
-    }
+    console.warn(`${MODULE_ID} | upload failed for ${target}`, error);
+    return null;
   }
 }
 
@@ -210,21 +175,37 @@ export async function importSessionPackage(loaded, options = {}) {
 
   /** @type {Map<string, string>} packagePath -> world data path */
   const uploaded = new Map();
-  const safeImportKey = importKey.replace(/[^a-zA-Z0-9_-]+/g, "_");
-  // FilePicker.upload requires the target directory to already exist.
-  for (const sub of ["assets/portraits", "assets/tokens", "assets/battlemaps", "assets/session"]) {
+  const importsBase = String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports";
+  const packageRoot = packageImportRoot(manifest, loaded.sourceLabel);
+  const importsRoot = await ensureDataFolder(`${importsBase}/${packageRoot}`);
+  console.log(`${MODULE_ID} | importing assets into Data/${importsRoot}`);
+
+  // Create parent folders from whatever asset paths the package actually contains
+  // (portraits today; later WD-type folders from DLCE without code changes).
+  const assetFolders = new Set();
+  for (const path of files.keys()) {
+    if (!path.startsWith("assets/")) {
+      continue;
+    }
+    const folder = path.replace(/\\/g, "/").split("/").slice(0, -1).join("/");
+    if (folder) {
+      assetFolders.add(folder);
+    }
+  }
+  for (const sub of assetFolders) {
     try {
-      await ensureDataFolder(`dlfi/${safeImportKey}/${sub}`);
+      await ensureDataFolder(`${importsRoot}/${sub}`);
     } catch (error) {
       console.warn(`${MODULE_ID} | precreate ${sub} failed`, error);
     }
   }
+
   let uploadFailures = 0;
   for (const [path, bytes] of files) {
     if (!path.startsWith("assets/")) {
       continue;
     }
-    const worldPath = await uploadAsset(path, bytes, importKey);
+    const worldPath = await uploadAsset(path, bytes, importsRoot);
     if (worldPath) {
       uploaded.set(path, worldPath);
     } else {
