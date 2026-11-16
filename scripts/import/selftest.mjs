@@ -68,9 +68,14 @@ const {
   formatPoisBulletList,
   locationDescriptionText,
   locationPois,
+  locationSessionNotesText,
   resolveColourBattlemapPath,
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
 } = await import("./packageLinks.mjs");
+const {
+  classifyLocationFieldDrawings,
+  classifyLocationFieldLabel
+} = await import("./scenePlacement.mjs");
 const {
   packageImportRoot,
   sessionInboxFolderName,
@@ -368,6 +373,72 @@ for (const path of paths) {
   assert(text.split("\n").length === 3, "POI bullet list has one line per POI");
   assert(text.startsWith("• "), "POI lines are bullets");
   assert(locationPois({ fields: { appearance: "only appearance" } }).length === 0, "no POIs when absent");
+}
+
+// Location field drawings: classify Description / POIs / Session Notes (+ legacy)
+{
+  assert(classifyLocationFieldLabel("Description") === "description", "label Description");
+  assert(classifyLocationFieldLabel("Description 1") === "description", "legacy Description 1");
+  assert(classifyLocationFieldLabel("POIs") === "pois", "label POIs");
+  assert(classifyLocationFieldLabel("Points of Interest") === "pois", "label Points of Interest");
+  assert(classifyLocationFieldLabel("Description 2") === "pois", "legacy Description 2");
+  assert(classifyLocationFieldLabel("Session Notes") === "sessionNotes", "label Session Notes");
+  assert(classifyLocationFieldLabel("Session Notes…") === "sessionNotes", "label Session Notes…");
+  assert(classifyLocationFieldLabel("Description 3") === "sessionNotes", "legacy Description 3");
+  assert(classifyLocationFieldLabel("Description 4") === "leftover", "legacy Description 4 is leftover");
+
+  const classified = classifyLocationFieldDrawings([
+    { id: "d1", text: "Description" },
+    { id: "d2", text: "POIs" },
+    { id: "d3", text: "Session Notes" },
+    { id: "d4", text: "Description 4" },
+    { id: "other", text: "Title card" }
+  ]);
+  assert(classified.description?.id === "d1", "classify picks Description box");
+  assert(classified.pois?.id === "d2", "classify picks POIs box");
+  assert(classified.sessionNotes?.id === "d3", "classify picks Session Notes box");
+  assert(
+    classified.leftovers.map((d) => d.id).join(",") === "d4",
+    "Description 4 goes to leftovers"
+  );
+  assert(classified.managed.length === 4, "managed count excludes unrelated drawings");
+
+  const legacy = classifyLocationFieldDrawings([
+    { id: "a", text: "Description 1" },
+    { id: "b", name: "Description 2" },
+    { id: "c", text: "Description 3" }
+  ]);
+  assert(legacy.description?.id === "a" && legacy.pois?.id === "b" && legacy.sessionNotes?.id === "c", "legacy 1/2/3 map");
+}
+
+// Description vs session notes helpers
+{
+  assert(
+    locationDescriptionText({ fields: { notes: "GM only", appearance: "A dusty hall" } }) ===
+      "A dusty hall",
+    "description uses appearance, not notes"
+  );
+  assert(
+    locationDescriptionText({ fields: { notes: "GM only" } }) === "",
+    "description ignores fields.notes when description/appearance absent"
+  );
+  assert(
+    locationSessionNotesText({ fields: { session_notes: "Watch the door" } }) === "Watch the door",
+    "session notes from fields.session_notes"
+  );
+  assert(
+    locationSessionNotesText({ fields: { session_note: "Quiet night" } }) === "Quiet night",
+    "session notes from fields.session_note"
+  );
+  assert(
+    locationSessionNotesText({}, { sessionNotes: "From manifest" }) === "From manifest",
+    "session notes fall back to manifest.sessionNotes"
+  );
+  assert(
+    locationSessionNotesText({ fields: { sessionNotes: "Doc wins" } }, { sessionNotes: "Manifest" }) ===
+      "Doc wins",
+    "document session notes beat manifest"
+  );
 }
 
 // Challenge enemies from links + fields + reverse NPC links

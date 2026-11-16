@@ -259,12 +259,35 @@ function normalizeEnemyField(value) {
 }
 
 /**
- * Location description text for Description drawings.
+ * Location description text for the Description drawing.
+ * Session notes are separate — do not fall back to fields.notes.
  */
 export function locationDescriptionText(raw) {
   const fields = raw?.fields ?? {};
   return String(
-    fields.description || fields.appearance || fields.notes || fields.location_description || ""
+    fields.description || fields.appearance || fields.location_description || ""
+  ).trim();
+}
+
+/**
+ * Session notes for the Session Notes drawing.
+ * Prefers document fields, then manifest.sessionNotes.
+ *
+ * @param {object|null|undefined} raw
+ * @param {object|null|undefined} manifest
+ */
+export function locationSessionNotesText(raw, manifest = null) {
+  const fields = raw?.fields ?? {};
+  return String(
+    fields.session_note ||
+      fields.session_notes ||
+      fields.sessionNotes ||
+      raw?.session_note ||
+      raw?.session_notes ||
+      raw?.sessionNotes ||
+      manifest?.sessionNotes ||
+      manifest?.session_notes ||
+      ""
   ).trim();
 }
 

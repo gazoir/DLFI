@@ -22,6 +22,7 @@ import {
   formatPoisBulletList,
   locationDescriptionText,
   locationPois,
+  locationSessionNotesText,
   resolveColourBattlemapPath
 } from "./packageLinks.mjs";
 import {
@@ -294,6 +295,7 @@ export async function importSessionPackage(loaded, options = {}) {
       scene,
       description: locationDescriptionText(raw),
       poisText: formatPoisBulletList(locationPois(raw)),
+      sessionNotes: locationSessionNotesText(raw, manifest),
       npcs: []
     });
   }
@@ -471,6 +473,7 @@ export async function importSessionPackage(loaded, options = {}) {
     await finalizeLocationScene(meta.scene, {
       description: meta.description,
       poisText: meta.poisText,
+      sessionNotes: meta.sessionNotes,
       npcs: meta.npcs
     });
   }

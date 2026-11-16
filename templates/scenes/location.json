@@ -91,7 +91,7 @@
         "radius": null,
         "points": []
       },
-      "text": "Description 1",
+      "text": "Description",
       "hidden": true,
       "fontSize": 34,
       "strokeWidth": 0,
@@ -127,43 +127,7 @@
         "radius": null,
         "points": []
       },
-      "text": "Description 2",
-      "hidden": true,
-      "fontSize": 34,
-      "strokeWidth": 0,
-      "author": "Xf4b5qd296TO2SRC",
-      "elevation": 0,
-      "sort": 0,
-      "rotation": 0,
-      "bezierFactor": 0,
-      "fillType": 1,
-      "fillColor": "#000000",
-      "fillAlpha": 0.3,
-      "strokeColor": "#a928cc",
-      "strokeAlpha": 1,
-      "texture": null,
-      "fontFamily": "Signika",
-      "textColor": "#ffffff",
-      "textAlpha": 1,
-      "locked": false,
-      "interface": false,
-      "flags": {
-        "LockView": {
-          "boundingBox": "disabled"
-        }
-      }
-    },
-    {
-      "x": 1590,
-      "y": 1035,
-      "shape": {
-        "type": "r",
-        "width": 800,
-        "height": 400,
-        "radius": null,
-        "points": []
-      },
-      "text": "Description 4",
+      "text": "POIs",
       "hidden": true,
       "fontSize": 34,
       "strokeWidth": 0,
@@ -199,7 +163,7 @@
         "radius": null,
         "points": []
       },
-      "text": "Description 3",
+      "text": "Session Notes",
       "hidden": true,
       "fontSize": 34,
       "strokeWidth": 0,

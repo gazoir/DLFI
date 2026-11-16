@@ -4,7 +4,8 @@
  * Template conventions (FOUNDRY_SYNC):
  * - NPC slots: 1A1, 2A1, 2A2, ...
  * - PC slots: 3P1 ... 6P6
- * - Description drawings: names/text matching /^Description\s*[1-4]$/i
+ * - Location field drawings (by text/name): Description, POIs / Points of Interest,
+ *   Session Notes… — plus legacy Description 1–3 (Description 4 is unused leftover)
  * - >4 NPCs beyond slots: extras in a line across the top of the scene
  */
 
@@ -12,48 +13,126 @@ import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
-// Match "Description 1" … "Description 4" on drawing text or name (template exports vary).
-const DESCRIPTION_RE = /^Description\s*([1-4])$/i;
+
+const CREATE_LAYOUT = {
+  description: { x: 100, y: 100 },
+  pois: { x: 100, y: 520 },
+  sessionNotes: { x: 100, y: 940 }
+};
+
+/**
+ * Classify a drawing label into a managed location field kind.
+ * @param {string} label
+ * @returns {"description"|"pois"|"sessionNotes"|"leftover"|null}
+ */
+export function classifyLocationFieldLabel(label) {
+  const text = String(label ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  if (/^Session\s+Notes?(?:\.{0,3}|…)?$/i.test(text)) {
+    return "sessionNotes";
+  }
+  if (/^(?:POIs?|Points?\s+of\s+Interest)$/i.test(text)) {
+    return "pois";
+  }
+  // Bare "Description" (new templates) — not Description 2/3/4.
+  if (/^Description$/i.test(text)) {
+    return "description";
+  }
+  // Legacy randomised boxes.
+  if (/^Description\s*1$/i.test(text)) {
+    return "description";
+  }
+  if (/^Description\s*2$/i.test(text)) {
+    return "pois";
+  }
+  if (/^Description\s*3$/i.test(text)) {
+    return "sessionNotes";
+  }
+  if (/^Description\s*4$/i.test(text)) {
+    return "leftover";
+  }
+  return null;
+}
+
+/**
+ * Partition location template drawings into dedicated field boxes.
+ * Prefer the first match per kind; duplicates and Description 4 go to leftovers.
+ *
+ * @param {Iterable<object>} drawings
+ * @returns {{
+ *   description: object|null,
+ *   pois: object|null,
+ *   sessionNotes: object|null,
+ *   leftovers: object[],
+ *   managed: object[]
+ * }}
+ */
+export function classifyLocationFieldDrawings(drawings) {
+  const result = {
+    description: null,
+    pois: null,
+    sessionNotes: null,
+    leftovers: [],
+    managed: []
+  };
+  for (const drawing of drawings ?? []) {
+    const kind = classifyLocationFieldLabel(drawing?.text ?? drawing?.name);
+    if (!kind) {
+      continue;
+    }
+    result.managed.push(drawing);
+    if (kind === "leftover") {
+      result.leftovers.push(drawing);
+      continue;
+    }
+    if (!result[kind]) {
+      result[kind] = drawing;
+    } else {
+      result.leftovers.push(drawing);
+    }
+  }
+  return result;
+}
 
 export async function finalizeLocationScene(
   scene,
-  { description = "", poisText = "", npcs = [] } = {}
+  { description = "", poisText = "", sessionNotes = "", npcs = [] } = {}
 ) {
   if (!scene) return;
   const npcSlots = listNpcSlots(scene);
-  const descriptionSlots = listDescriptionDrawings(scene);
+  const classified = classifyLocationFieldDrawings(
+    scene.drawings?.contents ?? scene.drawings ?? []
+  );
+  const hasManagedBoxes = classified.managed.length > 0;
 
-  // Description takes the first box; POIs take a different empty box (usually Description 2).
-  const usedDescriptionIds = new Set();
-  const descriptionId = await placeDescriptionOnScene(scene, description, descriptionSlots, {
-    kind: "description"
+  const deleteDrawingIds = classified.leftovers.map((d) => d.id).filter(Boolean);
+
+  await applyLocationFieldDrawing(scene, {
+    kind: "description",
+    text: description,
+    drawing: classified.description,
+    hasManagedBoxes,
+    deleteDrawingIds
   });
-  if (descriptionId) {
-    usedDescriptionIds.add(descriptionId);
-  }
-
-  let poiCandidates;
-  if (descriptionId) {
-    poiCandidates = descriptionSlots.filter((slot) => slot.id !== descriptionId);
-  } else if (descriptionSlots.length > 1) {
-    // Keep Description 1 reserved for description; use another empty box for POIs.
-    poiCandidates = descriptionSlots.slice(1);
-  } else {
-    poiCandidates = descriptionSlots;
-  }
-  const poiId = await placeDescriptionOnScene(scene, poisText, poiCandidates, {
+  await applyLocationFieldDrawing(scene, {
     kind: "pois",
-    createIfMissing: Boolean(String(poisText || "").trim()) && descriptionSlots.length === 0
+    text: poisText,
+    drawing: classified.pois,
+    hasManagedBoxes,
+    deleteDrawingIds
   });
-  if (poiId) {
-    usedDescriptionIds.add(poiId);
-  }
+  await applyLocationFieldDrawing(scene, {
+    kind: "sessionNotes",
+    text: sessionNotes,
+    drawing: classified.sessionNotes,
+    hasManagedBoxes,
+    deleteDrawingIds
+  });
 
   const usedNpcIds = await placeNpcsOnScene(scene, npcs, npcSlots);
 
-  const deleteDrawingIds = descriptionSlots
-    .map((d) => d.id)
-    .filter((id) => !usedDescriptionIds.has(id));
   const deleteTokenIds = npcSlots
     .map((t) => t.id)
     .filter((id) => !usedNpcIds.has(id));
@@ -71,7 +150,7 @@ export async function finalizeLandingScene(scene, pcs = []) {
   const slots = pcSlots.length ? pcSlots : listNpcSlots(scene);
   const usedPcIds = await placePcsOnScene(scene, pcs, slots);
 
-  const deleteDrawingIds = listDescriptionDrawings(scene).map((d) => d.id);
+  const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
   const deleteTokenIds = [
     ...(pcSlots.length ? listNpcSlots(scene).map((t) => t.id) : []),
     ...slots.map((t) => t.id).filter((id) => !usedPcIds.has(id))
@@ -81,7 +160,7 @@ export async function finalizeLandingScene(scene, pcs = []) {
 
 export async function finalizeUtilityScene(scene) {
   if (!scene) return;
-  const deleteDrawingIds = listDescriptionDrawings(scene).map((d) => d.id);
+  const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
   const deleteTokenIds = [
     ...listNpcSlots(scene).map((t) => t.id),
     ...listPcSlots(scene).map((t) => t.id)
@@ -105,7 +184,7 @@ export async function finalizeBattlemapScene(scene, enemies = []) {
   }
   const npcSlots = listNpcSlots(scene);
   const usedNpcIds = await placeEnemyTokensOnScene(scene, expanded, npcSlots);
-  const deleteDrawingIds = listDescriptionDrawings(scene).map((d) => d.id);
+  const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
   const deleteTokenIds = [
     ...npcSlots.map((t) => t.id).filter((id) => !usedNpcIds.has(id)),
     ...listPcSlots(scene).map((t) => t.id)
@@ -120,7 +199,7 @@ export async function finalizeLeftoversScene(scene, { npcs = [], itemNotes = [] 
   if (!scene) return;
   const npcSlots = listNpcSlots(scene);
   const usedNpcIds = await placeNpcsOnScene(scene, npcs, npcSlots);
-  const deleteDrawingIds = listDescriptionDrawings(scene).map((d) => d.id);
+  const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
   const deleteTokenIds = [
     ...npcSlots.map((t) => t.id).filter((id) => !usedNpcIds.has(id)),
     ...listPcSlots(scene).map((t) => t.id)
@@ -153,6 +232,50 @@ export async function finalizeLeftoversScene(scene, { npcs = [], itemNotes = [] 
     });
     await scene.createEmbeddedDocuments("Note", notes);
   }
+}
+
+async function applyLocationFieldDrawing(
+  scene,
+  { kind, text, drawing, hasManagedBoxes, deleteDrawingIds }
+) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) {
+    if (drawing?.id) {
+      deleteDrawingIds.push(drawing.id);
+    }
+    return;
+  }
+  if (drawing) {
+    await scene.updateEmbeddedDocuments("Drawing", [
+      {
+        _id: drawing.id,
+        text: trimmed,
+        hidden: true,
+        flags: {
+          ...(drawing.flags ?? {}),
+          [FLAG_SCOPE]: { kind, used: true }
+        }
+      }
+    ]);
+    return;
+  }
+  // Only create when the template has no managed field boxes at all.
+  if (hasManagedBoxes) {
+    return;
+  }
+  const layout = CREATE_LAYOUT[kind] ?? CREATE_LAYOUT.description;
+  await scene.createEmbeddedDocuments("Drawing", [
+    {
+      x: layout.x,
+      y: layout.y,
+      shape: { type: "r", width: 800, height: 400 },
+      text: trimmed,
+      hidden: true,
+      fontSize: 48,
+      strokeWidth: 0,
+      flags: { [FLAG_SCOPE]: { kind, used: true } }
+    }
+  ]);
 }
 
 async function placeEnemyTokensOnScene(scene, enemies, slots) {
@@ -216,50 +339,6 @@ async function placeEnemyTokensOnScene(scene, enemies, slots) {
     await scene.createEmbeddedDocuments("Token", create);
   }
   return used;
-}
-
-async function placeDescriptionOnScene(
-  scene,
-  description,
-  candidates,
-  { kind = "description", createIfMissing = true } = {}
-) {
-  const text = String(description || "").trim();
-  if (!text) {
-    return null;
-  }
-  if (!candidates.length) {
-    if (!createIfMissing) {
-      return null;
-    }
-    const created = await scene.createEmbeddedDocuments("Drawing", [
-      {
-        x: kind === "pois" ? 100 : 100,
-        y: kind === "pois" ? 520 : 100,
-        shape: { type: "r", width: 800, height: 400 },
-        text,
-        hidden: true,
-        fontSize: 48,
-        strokeWidth: 0,
-        flags: { [FLAG_SCOPE]: { kind, used: true } }
-      }
-    ]);
-    return created?.[0]?.id ?? null;
-  }
-  // Prefer the earliest remaining Description N (already sorted).
-  const pick = candidates[0];
-  await scene.updateEmbeddedDocuments("Drawing", [
-    {
-      _id: pick.id,
-      text,
-      hidden: true,
-      flags: {
-        ...(pick.flags ?? {}),
-        [FLAG_SCOPE]: { kind, used: true }
-      }
-    }
-  ]);
-  return pick.id;
 }
 
 async function placeNpcsOnScene(scene, npcs, slots) {
@@ -376,10 +455,10 @@ function listPcSlots(scene) {
     .sort(compareSlots);
 }
 
-function listDescriptionDrawings(scene) {
-  return [...(scene.drawings?.contents ?? scene.drawings ?? [])]
-    .filter((drawing) => DESCRIPTION_RE.test(String(drawing.text ?? drawing.name ?? "").trim()))
-    .sort((a, b) => descriptionIndex(a) - descriptionIndex(b));
+function listManagedFieldDrawings(scene) {
+  return [...(scene.drawings?.contents ?? scene.drawings ?? [])].filter(
+    (drawing) => classifyLocationFieldLabel(drawing.text ?? drawing.name) != null
+  );
 }
 
 function compareSlots(a, b) {
@@ -396,9 +475,4 @@ function parseSlot(name) {
   const pc = text.match(PC_SLOT_RE);
   if (pc) return { major: Number(pc[1]), minor: Number(pc[2]) };
   return { major: 99, minor: 99 };
-}
-
-function descriptionIndex(drawing) {
-  const match = String(drawing.text ?? drawing.name ?? "").trim().match(DESCRIPTION_RE);
-  return match ? Number(match[1]) : 99;
 }
