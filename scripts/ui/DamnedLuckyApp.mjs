@@ -1,14 +1,19 @@
 import {
+  DEFAULT_IMPORTS_PATH,
+  DEFAULT_INBOX_PATH,
   MODULE_ID,
   notify,
   setting,
+  setSetting,
+  SETTING_IMPORTS,
   SETTING_INBOX
 } from "../constants.mjs";
 import { importSessionPackage } from "../import/importSession.mjs";
+import { ensureDataFolder, pickDataFolder } from "../package/dataFolders.mjs";
+import { ensureInboxRoot, mirrorChosenZipToInbox } from "../package/inbox.mjs";
 import {
   groupPackagesBySession,
   listInboxCandidates,
-  loadPackageFromFolderPath,
   loadPackageFromZipBytes,
   loadPackageFromZipPath
 } from "../package/readPackage.mjs";
@@ -32,6 +37,8 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       refreshInbox: DamnedLuckyApp.#onRefreshInbox,
       loadVersion: DamnedLuckyApp.#onLoadVersion,
       chooseZip: DamnedLuckyApp.#onChooseZip,
+      pickInbox: DamnedLuckyApp.#onPickInbox,
+      pickImports: DamnedLuckyApp.#onPickImports,
       packLive: DamnedLuckyApp.#onPackLive
     }
   };
@@ -55,7 +62,8 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       sessions: this.#sessions,
       busy: this.#busy,
       status: this.#status,
-      inboxPath: setting(SETTING_INBOX),
+      inboxPath: setting(SETTING_INBOX) || DEFAULT_INBOX_PATH,
+      importsPath: setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH,
       isSessions: this.#tab === "sessions",
       isImport: this.#tab === "import",
       isPack: this.#tab === "pack"
@@ -67,22 +75,28 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     this.#status = "Scanning inbox…";
     this.render();
     try {
-      const inbox = setting(SETTING_INBOX);
+      await ensureInboxRoot();
+      await ensureDataFolder(setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH);
+      const inbox = setting(SETTING_INBOX) || DEFAULT_INBOX_PATH;
       const candidates = await listInboxCandidates(inbox);
       const loaded = [];
       for (const candidate of candidates) {
         try {
-          const pkg =
-            candidate.kind === "zip"
-              ? await loadPackageFromZipPath(candidate.path)
-              : await loadPackageFromFolderPath(candidate.path);
+          if (candidate.kind !== "zip") {
+            continue;
+          }
+          const pkg = await loadPackageFromZipPath(candidate.path);
           loaded.push({ ...candidate, package: pkg });
         } catch (error) {
           console.warn(`${MODULE_ID} | skip ${candidate.path}`, error);
         }
       }
       this.#sessions = groupPackagesBySession(loaded);
-      this.#status = `Found ${this.#sessions.length} session(s), ${loaded.length} package(s).`;
+      // Cap displayed versions per session to the retention count (newest first).
+      for (const session of this.#sessions) {
+        session.versions = session.versions.slice(0, 3);
+      }
+      this.#status = `Found ${this.#sessions.length} session(s), ${loaded.length} zip(s) in Data/${inbox}.`;
     } catch (error) {
       console.error(error);
       this.#status = error instanceof Error ? error.message : String(error);
@@ -104,6 +118,34 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static async #onRefreshInbox() {
     await this.refreshInbox();
+  }
+
+  static async #onPickInbox() {
+    const current = setting(SETTING_INBOX) || DEFAULT_INBOX_PATH;
+    const chosen = await pickDataFolder(current);
+    if (chosen == null) {
+      return;
+    }
+    const path = chosen || DEFAULT_INBOX_PATH;
+    await ensureDataFolder(path);
+    await setSetting(SETTING_INBOX, path);
+    this.#status = `Inbox path set to Data/${path}`;
+    notify(this.#status);
+    await this.refreshInbox();
+  }
+
+  static async #onPickImports() {
+    const current = setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH;
+    const chosen = await pickDataFolder(current);
+    if (chosen == null) {
+      return;
+    }
+    const path = chosen || DEFAULT_IMPORTS_PATH;
+    await ensureDataFolder(path);
+    await setSetting(SETTING_IMPORTS, path);
+    this.#status = `Imports path set to Data/${path}`;
+    notify(this.#status);
+    this.render();
   }
 
   static async #onLoadVersion(event, target) {
@@ -151,6 +193,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       try {
         const buffer = await file.arrayBuffer();
         const pkg = loadPackageFromZipBytes(buffer, file.name);
+        await mirrorChosenZipToInbox(file, buffer);
         await importSessionPackage(pkg);
         this.#status = `Imported ${pkg.manifest.displayCode} from ${file.name}.`;
         notify(this.#status);
@@ -199,7 +242,8 @@ function openDamnedLuckyDialogFallback() {
   new Dialog({
     title: "Damned Lucky",
     content: `<p>Import UI needs Foundry ApplicationV2. Check the console, or update Foundry.</p>
-      <p>Inbox: <code>Data/${setting(SETTING_INBOX)}</code></p>`,
+      <p>Inbox: <code>Data/${setting(SETTING_INBOX) || DEFAULT_INBOX_PATH}</code></p>
+      <p>Imports: <code>Data/${setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH}</code></p>`,
     buttons: { close: { label: "Close" } }
   }).render(true);
 }

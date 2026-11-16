@@ -16,6 +16,38 @@
   text-decoration: underline;
 }
 
+.dlfi-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+.dlfi-path-row {
+  align-items: center;
+  border: 1px solid var(--color-border-light-primary, #555);
+  border-radius: 0.35rem;
+  display: flex;
+  gap: 0.65rem;
+  justify-content: space-between;
+  padding: 0.55rem 0.65rem;
+}
+
+.dlfi-path-meta {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.dlfi-path-value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dlfi-toolbar {
   display: flex;
   flex-wrap: wrap;

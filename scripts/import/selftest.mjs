@@ -49,11 +49,38 @@ globalThis.CONFIG = {
 const {
   buildNpcNpcActorData,
   collectNpcLocationIds,
+  ensureNpcSkillsAndCr,
   parseHitDamageParts
 } = await import("./buildNpcActor.mjs");
+const { resolveLocationBackground, resolveNpcMedia } = await import("./resolvePackageAsset.mjs");
+const {
+  classifyLandingFileName,
+  resolveLandingPageArt,
+  shouldUploadPackagePath
+} = await import("./resolveLandingArt.mjs");
+
 const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = await import(
   "./damageFormula.mjs"
 );
+const {
+  buildNpcLocationsFromLocationLinks,
+  collectChallengeEnemies,
+  formatPoisBulletList,
+  locationDescriptionText,
+  locationPois,
+  locationSessionNotesText,
+  resolveColourBattlemapPath,
+  collectNpcLocationIds: collectNpcLocationIdsFromLinks
+} = await import("./packageLinks.mjs");
+const {
+  classifyLocationFieldDrawings,
+  classifyLocationFieldLabel
+} = await import("./scenePlacement.mjs");
+const {
+  packageImportRoot,
+  sessionInboxFolderName,
+  normalizeDataPath
+} = await import("../package/dataFolders.mjs");
 
 const DEFAULT_SAMPLES = [
   "/home/ubuntu/.cursor/projects/workspace/uploads/npc_wyvern_025d.json",
@@ -64,12 +91,11 @@ const paths = (process.argv.slice(2).length ? process.argv.slice(2) : DEFAULT_SA
   .map((p) => resolve(p))
   .filter((p) => existsSync(p));
 
-if (!paths.length) {
-  console.error("No sample NPC JSON files found.");
-  process.exit(1);
-}
-
 let failures = 0;
+
+if (!paths.length) {
+  console.warn("No sample NPC JSON files found — skipping actor sample assertions.");
+}
 
 function assert(condition, message) {
   if (!condition) {
@@ -155,6 +181,287 @@ for (const path of paths) {
     linked.every((id) => locs.includes(id)),
     `location links collected (${locs.join(", ") || "none"})`
   );
+}
+
+// Kira: location → NPC reverse link (Owned by), empty NPC links
+{
+  const locPath = "/home/ubuntu/.cursor/projects/workspace/uploads/loc_trader_fd35.json";
+  const npcPath = "/home/ubuntu/.cursor/projects/workspace/uploads/npc_kira_brannardor_df64.json";
+  if (existsSync(locPath) && existsSync(npcPath)) {
+    const loc = JSON.parse(readFileSync(locPath, "utf8"));
+    const npc = JSON.parse(readFileSync(npcPath, "utf8"));
+    const reverse = buildNpcLocationsFromLocationLinks([{ id: loc.id, file: "documents/loc_trader.json" }], (file) =>
+      file ? loc : null
+    );
+    assert(
+      (reverse.get("npc_kira_brannardor") || []).includes("loc_trader"),
+      "reverse index maps Kira ← loc_trader"
+    );
+    const withoutReverse = collectNpcLocationIdsFromLinks(
+      { id: npc.id, locationIds: [] },
+      npc,
+      []
+    );
+    assert(withoutReverse.length === 0, "Kira has no forward location links");
+    const withReverse = collectNpcLocationIdsFromLinks(
+      { id: npc.id, locationIds: [] },
+      npc,
+      reverse.get(npc.id) ?? []
+    );
+    assert(withReverse.includes("loc_trader"), "Kira places on loc_trader via reverse link");
+    assert(
+      locationDescriptionText(loc).includes("trader"),
+      "location description falls back to appearance"
+    );
+  } else {
+    console.log("skip: Kira/trader samples not present");
+  }
+}
+
+// Skills use correct ability + proficiency; CR defaults to 1
+{
+  const bareen = buildNpcNpcActorData(
+    {
+      fields: {
+        name: "Bareen Muradhgan",
+        check_str: 10,
+        check_dex: 6,
+        check_con: 14,
+        check_int: 15,
+        check_wis: 18,
+        check_cha: 17,
+        check_skills: ["Acrobatics", "Athletics", "Insight", "Medicine", "Stealth"]
+      }
+    },
+    { id: "npc_bareen", name: "Bareen Muradhgan" },
+    {}
+  );
+  assert(bareen.system.details.cr === 1, "default CR is 1 when unset");
+  assert(bareen.system.skills.ath?.ability === "str", "Athletics uses STR");
+  assert(bareen.system.skills.ins?.ability === "wis", "Insight uses WIS");
+  assert(bareen.system.skills.med?.ability === "wis", "Medicine uses WIS");
+  assert(bareen.system.skills.acr?.ability === "dex", "Acrobatics uses DEX");
+  assert(bareen.system.skills.ath?.value >= 1, "Athletics is proficient");
+  assert(bareen.system.skills.med?.value >= 1, "Medicine is proficient");
+
+  // Embedded actor with empty ability must be corrected (dnd5e DEX fallback).
+  const broken = { skills: { his: { value: 1, ability: "" }, inv: { value: 1 } }, details: { cr: null } };
+  ensureNpcSkillsAndCr(broken, { check_skills: "History, Investigation, Religion" });
+  assert(broken.details.cr === 1, "ensureNpcSkillsAndCr defaults CR");
+  assert(broken.skills.his.ability === "int", "History ability repaired to INT");
+  assert(broken.skills.inv.ability === "int", "Investigation ability repaired to INT");
+  assert(broken.skills.rel?.ability === "int" && broken.skills.rel.value >= 1, "Religion proficient + INT");
+}
+
+// Landing Page slides: Logo_Burn for background; upload Landing Page/ folder
+{
+  assert(classifyLandingFileName("SESSION_014_Logo_Burn.webp") === "logoBurn", "classify Logo_Burn");
+  assert(classifyLandingFileName("Mist_Opportunity_Logo Only.png") === "logoOnly", "classify Logo Only");
+  assert(classifyLandingFileName("title-only.webp") === "titleOnly", "classify title-only");
+  assert(classifyLandingFileName("session_Clean.jpg") === "clean", "classify Clean");
+  assert(shouldUploadPackagePath("Landing Page/x_Logo_Burn.webp"), "upload top-level Landing Page/");
+  assert(shouldUploadPackagePath("assets/npc/foo.webp"), "upload assets/");
+  assert(!shouldUploadPackagePath("documents/npc_kira.json"), "skip documents/");
+
+  const uploaded = new Map([
+    ["Landing Page/SESSION_Logo_Burn.webp", "world/Landing Page/SESSION_Logo_Burn.webp"],
+    ["Landing Page/SESSION_Clean.webp", "world/Landing Page/SESSION_Clean.webp"],
+    ["Landing Page/SESSION_Logo_Only.webp", "world/Landing Page/SESSION_Logo_Only.webp"],
+    ["Landing Page/SESSION_Title_Only.webp", "world/Landing Page/SESSION_Title_Only.webp"],
+    ["assets/session/old.webp", "world/assets/session/old.webp"]
+  ]);
+  const art = resolveLandingPageArt({ sessionArt: "assets/session/old.webp" }, uploaded);
+  assert(
+    art.background === "world/Landing Page/SESSION_Logo_Burn.webp",
+    `Logo_Burn preferred for Landing BG (got ${art.background})`
+  );
+  assert(art.logoOnly?.endsWith("Logo_Only.webp"), "logoOnly resolved");
+  assert(art.titleOnly?.endsWith("Title_Only.webp"), "titleOnly resolved");
+  assert(art.clean?.endsWith("Clean.webp"), "clean resolved");
+
+  const named = resolveLandingPageArt(
+    {
+      landingPage: {
+        logoBurn: "assets/Landing Page/burn.webp",
+        clean: "assets/Landing Page/clean.webp"
+      }
+    },
+    new Map([
+      ["assets/Landing Page/burn.webp", "world/burn.webp"],
+      ["assets/Landing Page/clean.webp", "world/clean.webp"]
+    ])
+  );
+  assert(named.background === "world/burn.webp", "manifest.landingPage.logoBurn wins");
+
+  const legacy = resolveLandingPageArt(
+    { sessionArt: "assets/session/cover.webp" },
+    new Map([["assets/session/cover.webp", "world/cover.webp"]])
+  );
+  assert(legacy.background === "world/cover.webp", "legacy sessionArt still works");
+}
+
+// Location artwork resolves under assets/location/ (DLCE v2 layout)
+{
+  const uploaded = new Map([
+    [
+      "assets/location/loc_ancient_ruin.webp",
+      "dlfi-imports/pkg/assets/location/loc_ancient_ruin.webp"
+    ]
+  ]);
+  const bg = resolveLocationBackground(
+    { id: "loc_ancient_ruin", name: "Fallen Temple", portrait: "assets/portraits/loc_ancient_ruin.webp" },
+    uploaded
+  );
+  assert(
+    bg === "dlfi-imports/pkg/assets/location/loc_ancient_ruin.webp",
+    `location bg from assets/location (got ${bg})`
+  );
+  const media = resolveNpcMedia(
+    { id: "npc_kira", portrait: "assets/portraits/npc_kira.webp" },
+    new Map([["assets/npc/npc_kira.webp", "world/kira.webp"]])
+  );
+  assert(media.portrait === "world/kira.webp", "NPC portrait falls back to assets/npc/");
+}
+
+// Colour battlemap preference
+{
+  const uploaded = new Map([
+    ["assets/battlemaps/ch_ambush_grid.webp", "world/grid.webp"],
+    ["assets/battlemaps/ch_ambush_colour.webp", "world/colour.webp"],
+    ["assets/battlemaps/ch_ambush_color.png", "world/color.png"]
+  ]);
+  const path = resolveColourBattlemapPath({
+    entry: { id: "ch_ambush", name: "Ambush", battlemap: null },
+    raw: { fields: { kind: "combat" } },
+    locationEntry: null,
+    uploaded,
+    assetPaths: [...uploaded.keys()]
+  });
+  assert(path === "world/colour.webp" || path === "world/color.png", `prefer colour battlemap (got ${path})`);
+  assert(!String(path).includes("grid"), "do not use grid overlay art");
+}
+
+// Storage path helpers
+{
+  const manifest = {
+    sessionCode: "SESSION_014",
+    displayCode: "SESSION_014",
+    sessionName: "Misty Lake",
+    exportedAt: "2026-11-09T17:00:06.864Z"
+  };
+  assert(
+    sessionInboxFolderName(manifest) === "SESSION_014 · Misty Lake",
+    `inbox folder name (${sessionInboxFolderName(manifest)})`
+  );
+  const root = packageImportRoot(manifest);
+  assert(root.startsWith("SESSION_014__Misty_Lake__"), `import root (${root})`);
+  assert(
+    normalizeDataPath("\\dlfi-imports\\foo\\") === "dlfi-imports/foo",
+    "normalizeDataPath strips slashes"
+  );
+}
+
+// Location POIs → bullet list
+{
+  const pois = locationPois({
+    fields: {
+      pois: [{ name: "Counter" }, { title: "Back room" }, "Window ledge"]
+    }
+  });
+  assert(pois.length === 3, `parse POI objects/strings (got ${pois.length})`);
+  const text = formatPoisBulletList(pois);
+  assert(text.split("\n").length === 3, "POI bullet list has one line per POI");
+  assert(text.startsWith("• "), "POI lines are bullets");
+  assert(locationPois({ fields: { appearance: "only appearance" } }).length === 0, "no POIs when absent");
+}
+
+// Location field drawings: classify Description / POIs / Session Notes (+ legacy)
+{
+  assert(classifyLocationFieldLabel("Description") === "description", "label Description");
+  assert(classifyLocationFieldLabel("Description 1") === "description", "legacy Description 1");
+  assert(classifyLocationFieldLabel("POIs") === "pois", "label POIs");
+  assert(classifyLocationFieldLabel("Points of Interest") === "pois", "label Points of Interest");
+  assert(classifyLocationFieldLabel("Description 2") === "pois", "legacy Description 2");
+  assert(classifyLocationFieldLabel("Session Notes") === "sessionNotes", "label Session Notes");
+  assert(classifyLocationFieldLabel("Session Notes…") === "sessionNotes", "label Session Notes…");
+  assert(classifyLocationFieldLabel("Description 3") === "sessionNotes", "legacy Description 3");
+  assert(classifyLocationFieldLabel("Description 4") === "leftover", "legacy Description 4 is leftover");
+
+  const classified = classifyLocationFieldDrawings([
+    { id: "d1", text: "Description" },
+    { id: "d2", text: "POIs" },
+    { id: "d3", text: "Session Notes" },
+    { id: "d4", text: "Description 4" },
+    { id: "other", text: "Title card" }
+  ]);
+  assert(classified.description?.id === "d1", "classify picks Description box");
+  assert(classified.pois?.id === "d2", "classify picks POIs box");
+  assert(classified.sessionNotes?.id === "d3", "classify picks Session Notes box");
+  assert(
+    classified.leftovers.map((d) => d.id).join(",") === "d4",
+    "Description 4 goes to leftovers"
+  );
+  assert(classified.managed.length === 4, "managed count excludes unrelated drawings");
+
+  const legacy = classifyLocationFieldDrawings([
+    { id: "a", text: "Description 1" },
+    { id: "b", name: "Description 2" },
+    { id: "c", text: "Description 3" }
+  ]);
+  assert(legacy.description?.id === "a" && legacy.pois?.id === "b" && legacy.sessionNotes?.id === "c", "legacy 1/2/3 map");
+}
+
+// Description vs session notes helpers
+{
+  assert(
+    locationDescriptionText({ fields: { notes: "GM only", appearance: "A dusty hall" } }) ===
+      "A dusty hall",
+    "description uses appearance, not notes"
+  );
+  assert(
+    locationDescriptionText({ fields: { notes: "GM only" } }) === "",
+    "description ignores fields.notes when description/appearance absent"
+  );
+  assert(
+    locationSessionNotesText({ fields: { session_notes: "Watch the door" } }) === "Watch the door",
+    "session notes from fields.session_notes"
+  );
+  assert(
+    locationSessionNotesText({ fields: { session_note: "Quiet night" } }) === "Quiet night",
+    "session notes from fields.session_note"
+  );
+  assert(
+    locationSessionNotesText({}, { sessionNotes: "From manifest" }) === "From manifest",
+    "session notes fall back to manifest.sessionNotes"
+  );
+  assert(
+    locationSessionNotesText({ fields: { sessionNotes: "Doc wins" } }, { sessionNotes: "Manifest" }) ===
+      "Doc wins",
+    "document session notes beat manifest"
+  );
+}
+
+// Challenge enemies from links + fields + reverse NPC links
+{
+  const enemies = collectChallengeEnemies(
+    { id: "ch_fight" },
+    {
+      links: [{ target_type: "npc", target_id: "npc_a", count: 2 }],
+      fields: { enemies: [{ id: "npc_b", quantity: 3 }] }
+    },
+    {
+      npcDocuments: [
+        {
+          id: "npc_c",
+          raw: { links: [{ target_type: "challenge", target_id: "ch_fight" }] }
+        }
+      ]
+    }
+  );
+  const byId = Object.fromEntries(enemies.map((e) => [e.npcId, e.count]));
+  assert(byId.npc_a === 2, "enemy count from challenge link");
+  assert(byId.npc_b === 3, "enemy count from fields.enemies");
+  assert(byId.npc_c === 1, "enemy from NPC→challenge link");
 }
 
 if (failures) {
