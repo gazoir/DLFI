@@ -77,6 +77,13 @@ const {
   classifyLocationFieldLabel
 } = await import("./scenePlacement.mjs");
 const {
+  buildMsdSceneSequence,
+  formatSceneDmName,
+  isCombatChallengeEntry,
+  padSceneOrder
+} = await import("./sceneOrder.mjs");
+const { convertMsdHtmlForFoundry } = await import("./msdJournal.mjs");
+const {
   packageImportRoot,
   sessionInboxFolderName,
   normalizeDataPath
@@ -462,6 +469,162 @@ for (const path of paths) {
   assert(byId.npc_a === 2, "enemy count from challenge link");
   assert(byId.npc_b === 3, "enemy count from fields.enemies");
   assert(byId.npc_c === 1, "enemy from NPC→challenge link");
+}
+
+// Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded
+{
+  assert(padSceneOrder(1) === "01" && padSceneOrder(12) === "12", "padSceneOrder");
+  assert(
+    formatSceneDmName("location", { name: "Dock" }, 1) === "01. Dock",
+    "location DM name"
+  );
+  assert(
+    formatSceneDmName("battlemap", { name: "Ambush" }, 2) === "02. Battle — Ambush",
+    "battlemap DM name"
+  );
+  assert(
+    isCombatChallengeEntry({ type: "challenge", subtype: "combat" }, { fields: { kind: "combat" } }),
+    "combat challenge detected"
+  );
+  assert(
+    !isCombatChallengeEntry(
+      { type: "challenge", subtype: "dialogue" },
+      { fields: { kind: "dialogue" } }
+    ),
+    "dialogue challenge excluded"
+  );
+
+  const docs = {
+    "documents/ch_ambush.json": { fields: { kind: "combat" } },
+    "documents/ch_talk.json": { fields: { kind: "dialogue" } },
+    "documents/ch_brawl.json": { fields: { kind: "combat" } }
+  };
+  const readDocument = (file) => docs[file] ?? null;
+  const fallbackManifest = {
+    documents: [
+      { id: "loc_a", type: "location", name: "LocA", file: "documents/loc_a.json", msdOrder: 1 },
+      { id: "loc_b", type: "location", name: "LocB", file: "documents/loc_b.json", msdOrder: 2 },
+      { id: "loc_c", type: "location", name: "LocC", file: "documents/loc_c.json", msdOrder: 3 },
+      {
+        id: "ch_ambush",
+        type: "challenge",
+        name: "Ambush",
+        file: "documents/ch_ambush.json",
+        locationIds: ["loc_a"]
+      },
+      {
+        id: "ch_talk",
+        type: "challenge",
+        name: "Talk",
+        file: "documents/ch_talk.json",
+        locationIds: ["loc_a"],
+        subtype: "dialogue"
+      },
+      {
+        id: "ch_brawl",
+        type: "challenge",
+        name: "Brawl",
+        file: "documents/ch_brawl.json",
+        locationIds: ["loc_b"]
+      }
+    ]
+  };
+  const seq = buildMsdSceneSequence(fallbackManifest, { readDocument });
+  assert(
+    seq.map((row) => row.entry.id).join(",") === "loc_a,ch_ambush,loc_b,ch_brawl,loc_c",
+    `fallback sequence LocA→combat@A→LocB→combat@B→LocC (got ${seq.map((r) => r.entry.id).join(",")})`
+  );
+  assert(!seq.some((row) => row.entry.id === "ch_talk"), "dialogue combat excluded from sequence");
+  assert(seq[0].order === 1 && seq[1].kind === "battlemap", "orders start at 1; combat is battlemap");
+
+  // Unified msdOrder path (locations + combat challenges all ordered)
+  const unifiedManifest = {
+    documents: [
+      { id: "loc_c", type: "location", name: "LocC", file: "documents/loc_c.json", msdOrder: 4 },
+      { id: "loc_a", type: "location", name: "LocA", file: "documents/loc_a.json", msdOrder: 1 },
+      {
+        id: "ch_ambush",
+        type: "challenge",
+        name: "Ambush",
+        file: "documents/ch_ambush.json",
+        locationIds: ["loc_a"],
+        msdOrder: 2
+      },
+      { id: "loc_b", type: "location", name: "LocB", file: "documents/loc_b.json", msdOrder: 3 },
+      {
+        id: "ch_talk",
+        type: "challenge",
+        name: "Talk",
+        file: "documents/ch_talk.json",
+        locationIds: ["loc_b"],
+        subtype: "dialogue",
+        msdOrder: 99
+      }
+    ]
+  };
+  const unified = buildMsdSceneSequence(unifiedManifest, { readDocument });
+  assert(
+    unified.map((row) => row.entry.id).join(",") === "loc_a,ch_ambush,loc_b,loc_c",
+    `unified msdOrder sequence (got ${unified.map((r) => r.entry.id).join(",")})`
+  );
+  assert(
+    formatSceneDmName(unified[1].kind, unified[1].entry, unified[1].order) ===
+      "02. Battle — Ambush",
+    "unified battlemap keeps sequential DM name"
+  );
+}
+
+// MSD → Foundry journal: title/h2/h3 UUID links + portrait inject
+{
+  const msdHtml = `<!doctype html>
+<article class="dlce-v2-msd-page dlce-v2-msd-title-page" data-msd-session-title="Misty Lake">
+  <div class="dlce-v2-msd-title-logo" role="img" aria-label="the Damned Lucky"></div>
+  <div class="dlce-v2-msd-title-session-name" data-msd-title="Misty Lake">Misty Lake</div>
+  <div class="dlce-v2-msd-h1" role="heading" aria-level="1">Contents</div>
+</article>
+<div class="dlce-v2-msd-flow-source" hidden aria-hidden="true">
+  <section class="dlce-v2-msd-location" data-msd-location-id="loc_a" data-msd-host-id="loc_a" data-msd-label="LocA" draggable="true">
+    <div class="dlce-v2-msd-h2" role="heading" aria-level="2">📍 LocA</div>
+    <p class="dlce-v2-msd-body">See <span data-msd-related-id="npc_kira">Kira</span>.</p>
+    <section class="dlce-v2-msd-child" data-msd-wd-id="ch_ambush" data-msd-label="Ambush" draggable="true">
+      <div class="dlce-v2-msd-h3" role="heading" aria-level="3">⚔️ Ambush</div>
+    </section>
+  </section>
+</div>
+<div class="dlce-v2-msd-appendix-source" hidden aria-hidden="true"><p>Appendix maps</p></div>`;
+
+  const createdByDlceId = new Map([
+    ["loc_a", "Scene.locA"],
+    ["ch_ambush", "Scene.ambush"],
+    ["npc_kira", "Actor.kira"]
+  ]);
+  const uploaded = new Map([
+    ["assets/location/loc_a.webp", "dlfi-imports/pkg/assets/location/loc_a.webp"]
+  ]);
+  const documents = [
+    { id: "loc_a", type: "location", name: "LocA", portrait: "assets/location/loc_a.webp" },
+    { id: "ch_ambush", type: "challenge", name: "Ambush" }
+  ];
+  const journal = convertMsdHtmlForFoundry(msdHtml, { createdByDlceId, uploaded, documents });
+  assert(/<h1\b[^>]*>Misty Lake<\/h1>/.test(journal), "title session name promoted to h1");
+  assert(/<h1\b[^>]*>Contents<\/h1>/.test(journal), "msd h1 div promoted");
+  assert(
+    journal.includes("@UUID[Scene.locA]{LocA}"),
+    "location h2 linked to scene UUID"
+  );
+  assert(
+    journal.includes("@UUID[Scene.ambush]{Ambush}"),
+    "challenge h3 linked to battlemap UUID"
+  );
+  assert(journal.includes("@UUID[Actor.kira]{Kira}"), "related-id span → @UUID");
+  assert(
+    /src="dlfi-imports\/pkg\/assets\/location\/loc_a\.webp"/.test(journal),
+    "portrait injected with uploaded path"
+  );
+  assert(!/dlce-v2-msd-title-logo/.test(journal), "logo overlay stripped");
+  assert(!/\bdraggable=/.test(journal), "draggable attrs stripped");
+  assert(!/\bhidden\b/.test(journal) || !/flow-source/.test(journal), "flow chrome unwrapped");
+  assert(journal.includes("Appendix maps"), "appendix content included");
 }
 
 if (failures) {

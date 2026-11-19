@@ -131,7 +131,7 @@
         },
         "msdOrder": {
           "type": ["integer", "null"],
-          "description": "1-based order among locations in the MSD when known."
+          "description": "1-based MSD appearance order for locations and combat challenges (unified sequence). Non-combat challenges omit this."
         }
       }
     },

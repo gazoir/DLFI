@@ -40,6 +40,11 @@ import {
   finalizeLocationScene
 } from "./scenePlacement.mjs";
 import {
+  buildMsdSceneSequence,
+  formatSceneDmName
+} from "./sceneOrder.mjs";
+import { convertMsdHtmlForFoundry } from "./msdJournal.mjs";
+import {
   bundledKindForSetting,
   createSceneFromBundledTemplate
 } from "./defaultTemplates.mjs";
@@ -58,14 +63,6 @@ function decodeJson(bytes) {
 
 function decodeText(bytes) {
   return new TextDecoder("utf-8").decode(bytes);
-}
-
-function padOrder(order) {
-  const n = Number(order);
-  if (!Number.isFinite(n) || n < 1) {
-    return "99";
-  }
-  return String(Math.floor(n)).padStart(2, "0");
 }
 
 /**
@@ -253,51 +250,102 @@ export async function importSessionPackage(loaded, options = {}) {
   let landingScene = null;
   let leftoversScene = null;
 
-  // --- Locations as scenes ---
+  // --- Locations + combat battlemaps in MSD appearance order (before Landing/Leftovers) ---
   const locations = (manifest.documents ?? []).filter((entry) => entry.type === "location");
-  locations.sort((a, b) => (a.msdOrder ?? 99) - (b.msdOrder ?? 99));
+  const battlemapAssetPaths = [
+    ...(manifest.assets?.battlemaps ?? []),
+    ...[...uploaded.keys()].filter(
+      (path) =>
+        /^assets\/battlemaps\//i.test(path) || /^assets\/location\/battlemaps\//i.test(path)
+    )
+  ];
+  /** @type {Array<{ scene: Scene, entry: object, raw: object|null }>} */
+  const battlemapMeta = [];
+  const sceneSequence = buildMsdSceneSequence(manifest, { readDocument });
 
-  for (const entry of locations) {
-    const order = padOrder(entry.msdOrder);
-    const dmName = `${order}. ${entry.name}`;
-    let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName, {
-        folderId: folders.Scene?.id ?? null,
+  for (const step of sceneSequence) {
+    const { kind, entry, order } = step;
+    const dmName = formatSceneDmName(kind, entry, order);
+
+    if (kind === "location") {
+      let scene =
+        (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName, {
+          folderId: folders.Scene?.id ?? null,
+          flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+        })) ??
+        (await Scene.create({
+          name: dmName,
+          navigation: true,
+          folder: folders.Scene?.id ?? null,
+          flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+        }));
+
+      const bg = resolveLocationBackground(entry, uploaded);
+      await scene.update({
+        name: dmName,
+        navName: "",
+        navigation: true,
+        folder: folders.Scene?.id ?? null,
         flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+      });
+      if (bg) {
+        await applySceneBackground(scene, bg);
+      } else {
+        console.warn(
+          `${MODULE_ID} | no location artwork for ${entry.id} (${entry.name}); tried portrait=${entry.portrait ?? "—"}`
+        );
+      }
+      sessionSceneIds.push(scene.id);
+      createdByDlceId.set(entry.id, scene.uuid);
+
+      const raw = readDocument(entry.file);
+      locationSceneMeta.set(entry.id, {
+        scene,
+        description: locationDescriptionText(raw),
+        poisText: formatPoisBulletList(locationPois(raw)),
+        sessionNotes: locationSessionNotesText(raw, manifest),
+        npcs: []
+      });
+      continue;
+    }
+
+    // battlemap
+    const raw = step.raw ?? readDocument(entry.file);
+    const locId = (entry.locationIds ?? [])[0];
+    const locEntry =
+      (manifest.documents ?? []).find((d) => d.id === locId && d.type === "location") ?? null;
+    const mapPath = resolveColourBattlemapPath({
+      entry,
+      raw,
+      locationEntry: locEntry,
+      uploaded,
+      assetPaths: battlemapAssetPaths
+    });
+    let scene =
+      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, dmName, {
+        folderId: folders.Scene?.id ?? null,
+        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
       })) ??
       (await Scene.create({
         name: dmName,
         navigation: true,
-        folder: folders.Scene?.id ?? null,
-        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+        folder: folders.Scene?.id ?? null
       }));
-
-    const bg = resolveLocationBackground(entry, uploaded);
     await scene.update({
       name: dmName,
       navName: "",
       navigation: true,
       folder: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
+      flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
     });
-    if (bg) {
-      await applySceneBackground(scene, bg);
+    if (!mapPath) {
+      console.warn(`${MODULE_ID} | no colour battlemap found for ${entry.id} (${entry.name})`);
     } else {
-      console.warn(
-        `${MODULE_ID} | no location artwork for ${entry.id} (${entry.name}); tried portrait=${entry.portrait ?? "—"}`
-      );
+      await applySceneBackground(scene, mapPath);
     }
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
-
-    const raw = readDocument(entry.file);
-    locationSceneMeta.set(entry.id, {
-      scene,
-      description: locationDescriptionText(raw),
-      poisText: formatPoisBulletList(locationPois(raw)),
-      sessionNotes: locationSessionNotesText(raw, manifest),
-      npcs: []
-    });
+    battlemapMeta.push({ scene, entry, raw });
   }
 
   // Reverse index: location "Owned by" / similar links → NPC placement
@@ -379,58 +427,6 @@ export async function importSessionPackage(loaded, options = {}) {
   });
   leftoversScene = leftovers;
   sessionSceneIds.push(leftovers.id);
-
-  // --- Battlemap scene shells for combat challenges ---
-  const battlemapAssetPaths = [
-    ...(manifest.assets?.battlemaps ?? []),
-    ...[...uploaded.keys()].filter((path) => /^assets\/battlemaps\//i.test(path))
-  ];
-  /** @type {Array<{ scene: Scene, entry: object, raw: object|null }>} */
-  const battlemapMeta = [];
-  const combats = (manifest.documents ?? []).filter((entry) => entry.type === "challenge");
-  for (const entry of combats) {
-    const raw = readDocument(entry.file);
-    const kind = String(raw?.fields?.kind ?? entry.subtype ?? "").toLowerCase();
-    if (kind && kind !== "combat") {
-      continue;
-    }
-    const locId = (entry.locationIds ?? [])[0];
-    const locEntry =
-      (manifest.documents ?? []).find((d) => d.id === locId && d.type === "location") ?? null;
-    const mapPath = resolveColourBattlemapPath({
-      entry,
-      raw,
-      locationEntry: locEntry,
-      uploaded,
-      assetPaths: battlemapAssetPaths
-    });
-    const sceneName = `Battle — ${entry.name}`;
-    let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, sceneName, {
-        folderId: folders.Scene?.id ?? null,
-        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
-      })) ??
-      (await Scene.create({
-        name: sceneName,
-        navigation: true,
-        folder: folders.Scene?.id ?? null
-      }));
-    await scene.update({
-      name: sceneName,
-      navName: "",
-      navigation: true,
-      folder: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
-    });
-    if (!mapPath) {
-      console.warn(`${MODULE_ID} | no colour battlemap found for ${entry.id} (${entry.name})`);
-    } else {
-      await applySceneBackground(scene, mapPath);
-    }
-    sessionSceneIds.push(scene.id);
-    createdByDlceId.set(entry.id, scene.uuid);
-    battlemapMeta.push({ scene, entry, raw });
-  }
 
   // --- NPCs / monsters as Actors ---
   /** @type {Map<string, Actor>} */
@@ -609,7 +605,11 @@ export async function importSessionPackage(loaded, options = {}) {
   const msdPath = manifest.msd || "msd/msd.html";
   const msdBytes = files.get(msdPath);
   if (msdBytes) {
-    const html = rewriteMsdLinks(decodeText(msdBytes), createdByDlceId);
+    const html = convertMsdHtmlForFoundry(decodeText(msdBytes), {
+      createdByDlceId,
+      uploaded,
+      documents: manifest.documents ?? []
+    });
     await JournalEntry.create({
       name: `${folderName} — MSD`,
       folder: folders.JournalEntry?.id ?? null,
@@ -679,18 +679,6 @@ function mapItemType(subtype, fields) {
     return "loot";
   }
   return "loot";
-}
-
-function rewriteMsdLinks(html, createdByDlceId) {
-  // Leave unresolved wiki-style names; replace data-dlce-id when present.
-  let next = html;
-  for (const [dlceId, uuid] of createdByDlceId) {
-    if (dlceId.startsWith("__")) {
-      continue;
-    }
-    next = next.replaceAll(`data-dlce-id="${dlceId}"`, `data-uuid="${uuid}"`);
-  }
-  return next;
 }
 
 function escapeHtml(value) {
