@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.25`)
+## Status (`0.1.26`)
 
 Working in this slice:
 
@@ -35,6 +35,7 @@ Working in this slice:
 - **0.1.23:** Landing background = Clean; Logo Only / Title Only art replace named template tiles
 - **0.1.24:** PC tokens Friendly; location NPC tokens Neutral (combat enemies stay Hostile)
 - **0.1.25:** Melee attacks pick DEX when to-hit matches DEX+prof (fixes Imp Sting +10); warn when to-hit is wild for CR
+- **0.1.26:** Battlemap PC tokens use Known as + Hovered by Anyone (default prototype too)
 
 Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 

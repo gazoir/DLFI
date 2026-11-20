@@ -275,7 +275,8 @@ export async function finalizeBattlemapScene(scene, options = {}) {
       disposition: TOKEN_DISPOSITION.FRIENDLY,
       suffix: "",
       dlceId: row.dlceId ?? null,
-      label: row.label ?? null
+      label: row.label ?? null,
+      tokenName: row.tokenName ?? row.label ?? null
     });
   }
 
@@ -351,7 +352,14 @@ export function sceneCanvasMetrics(scene) {
 }
 
 /**
- * @param {{ actor: Actor, linked?: boolean, kind?: string, suffix?: string }} row
+ * @param {{
+ *   actor: Actor,
+ *   linked?: boolean,
+ *   kind?: string,
+ *   suffix?: string,
+ *   tokenName?: string|null,
+ *   label?: string|null
+ * }} row
  */
 export function tokenPlacementSpec(row) {
   const actor = row.actor;
@@ -361,8 +369,10 @@ export function tokenPlacementSpec(row) {
   const textureSrc = pickTokenTexture(actor, row.variantIndex, FLAG_SCOPE);
   const scaleX = Number(proto?.texture?.scaleX);
   const scaleY = Number(proto?.texture?.scaleY);
+  const baseName =
+    String(row.tokenName || row.label || actor?.name || "").trim() || "Token";
   return {
-    name: `${actor.name}${row.suffix || ""}`,
+    name: `${baseName}${row.suffix || ""}`,
     actorId: actor.id,
     actorUuid: actor.uuid,
     linked: Boolean(row.linked),
@@ -434,10 +444,10 @@ export function layoutBattlemapRosterLines({
           spec.kind === "battle-enemy"
             ? (spec.disposition ?? TOKEN_DISPOSITION.HOSTILE)
             : (spec.disposition ?? TOKEN_DISPOSITION.FRIENDLY),
+        displayName: tokenDisplayHover(),
         ...(spec.kind === "battle-enemy"
           ? {
-              lockRotation: true,
-              displayName: tokenDisplayHover()
+              lockRotation: true
             }
           : {}),
         width: spec.width,

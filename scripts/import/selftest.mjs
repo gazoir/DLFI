@@ -740,6 +740,18 @@ for (const path of paths) {
   assert(layout.enemyTokens[0].actorLink === false, "enemy token unlinked");
   assert(layout.partyTokens[0].actorLink === true, "PC token linked");
   assert(layout.partyTokens[0].disposition === 1, "PC token disposition Friendly");
+  assert(layout.partyTokens[0].displayName === 30, "party token Hovered by Anyone");
+}
+
+// Battlemap PC token uses knownAs, not full actor name
+{
+  const spec = tokenPlacementSpec({
+    actor: { id: "pc", uuid: "Actor.pc", name: "Isabella Brightblade", prototypeToken: {} },
+    linked: true,
+    kind: "battle-pc",
+    tokenName: "Ibby"
+  });
+  assert(spec.name === "Ibby", "battlemap PC token name is knownAs");
 }
 
 // Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded
@@ -959,17 +971,21 @@ for (const path of paths) {
   const stub = buildPcActorData(
     {
       id: "pc_ibby",
-      name: "Ibby",
+      name: "Isabella Brightblade",
+      knownAs: "Ibby",
       ddbUrl: "https://www.dndbeyond.com/characters/118758199",
       ddbId: "118758199"
     },
     { portrait: "world/ibby.webp", token: "world/ibby_token.webp", tokenScale: 1.1 }
   );
   assert(stub.type === "character", "PC stub is character");
+  assert(stub.name === "Isabella Brightblade", "PC actor keeps full name");
   assert(stub.flags?.ddbimporter?.dndbeyond?.url?.includes("118758199"), "DDB url flag");
   assert(stub.flags?.ddbimporter?.dndbeyond?.characterId === "118758199", "DDB characterId flag");
   assert(stub.prototypeToken?.actorLink === true, "PC prototype linked");
   assert(stub.prototypeToken?.disposition === 1, "PC prototype Friendly");
+  assert(stub.prototypeToken?.name === "Ibby", "PC default token uses knownAs");
+  assert(stub.prototypeToken?.displayName === 30, "PC default token Hovered by Anyone");
   assert(stub.prototypeToken?.texture?.src === "world/ibby_token.webp", "PC token art");
   assert(stub.prototypeToken?.texture?.scaleX === 1.1, "PC VTTTT scale");
 
