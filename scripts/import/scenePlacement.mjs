@@ -179,7 +179,7 @@ export async function finalizeUtilityScene(scene) {
  *
  * @param {Scene} scene
  * @param {{
- *   enemies?: Array<{ actor: Actor, count?: number }>,
+ *   enemies?: Array<{ actor: Actor, count?: number, disposition?: number }>,
  *   party?: Array<{ actor: Actor, linked?: boolean, kind?: string }>
  * }} [options]
  */
@@ -196,6 +196,7 @@ export async function finalizeBattlemapScene(scene, options = {}) {
         actor: row.actor,
         linked: false,
         kind: "battle-enemy",
+        disposition: row.disposition,
         variantIndex: count > 1 ? i : undefined,
         suffix: count > 1 ? ` ${i + 1}` : ""
       });
@@ -280,6 +281,7 @@ export function tokenPlacementSpec(row) {
     actorUuid: actor.uuid,
     linked: Boolean(row.linked),
     kind: row.kind || "battle-token",
+    disposition: row.disposition,
     width,
     height,
     textureSrc,
@@ -343,7 +345,11 @@ export function layoutBattlemapRosterLines({
         actorId: spec.actorId,
         actorLink: spec.linked,
         ...(spec.kind === "battle-enemy"
-          ? { lockRotation: true, displayName: tokenDisplayHover() }
+          ? {
+              lockRotation: true,
+              displayName: tokenDisplayHover(),
+              disposition: spec.disposition ?? -1
+            }
           : {}),
         width: spec.width,
         height: spec.height,
