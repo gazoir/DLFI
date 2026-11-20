@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.19`)
+## Status (`0.1.20`)
 
 Working in this slice:
 
@@ -29,6 +29,7 @@ Working in this slice:
 - **Sessions tab:** lists imported sessions (by `sessionCode`, with scene/actor/item/journal counts and a Live badge); **Activate** flips exclusive navigation + Landing + live-session setting without re-importing; **bulk delete** removes the selected sessions' world folders, scenes, actors, items and journals (PC actors are kept) and, when Foundry allows file deletion, `Data/dlfi-imports/{sessionCode}__*`
 - **Replace on re-import** (world setting, default on): loading a session code that is already imported first removes its previous import so re-syncs do not pile up
 - **NPC prototype tokens:** Lock Artwork Rotation on, name display = Hovered by Anyone (`30`); enemies that appear in combat encounters are **unlinked** (`actorLink: false`), other NPCs and PCs stay linked; NPCs with several token art slots get `randomImg: true` and a `*` wildcard `texture.src` (see below)
+- **0.1.20:** format v3 accepted without warning; FilePicker resolved via `foundry.applications.apps.FilePicker.implementation` (V13+/V15-safe); battlemap enemy collect/placement logged (counts + npc ids, warnings when empty); 404 on asset purge treated as already deleted
 
 Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 
@@ -43,7 +44,7 @@ Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 
 ## Package contract
 
-`schemas/dlce-session-package.schema.json` mirrors DLCE. `packageFormatVersion` `1` or `2` is accepted.
+`schemas/dlce-session-package.schema.json` mirrors DLCE. `packageFormatVersion` `1`, `2`, or `3` is accepted (v3 = Landing Page assets).
 
 ### Landing Page slides
 

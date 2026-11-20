@@ -233,8 +233,19 @@ export async function finalizeBattlemapScene(scene, options = {}) {
   });
 
   const create = [...layout.enemyTokens, ...layout.partyTokens];
+  const enemyIds = [...new Set(expandedEnemies.map((row) => row.actor?.id).filter(Boolean))];
+  if (!layout.enemyTokens.length) {
+    console.warn(`${MODULE_ID} | ${scene.name}: no enemy tokens to place (${enemies.length} enemy row(s) supplied)`);
+  }
   if (create.length) {
-    await scene.createEmbeddedDocuments("Token", create);
+    const created = await scene.createEmbeddedDocuments("Token", create);
+    const createdCount = created?.length ?? create.length;
+    console.log(
+      `${MODULE_ID} | ${scene.name}: placed ${createdCount}/${create.length} tokens ` +
+        `(${layout.enemyTokens.length} enemy, ${layout.partyTokens.length} party); enemy npc actor ids: ${enemyIds.join(", ") || "none"}`
+    );
+  } else {
+    console.warn(`${MODULE_ID} | ${scene.name}: no tokens created (0 enemies, 0 party)`);
   }
 }
 

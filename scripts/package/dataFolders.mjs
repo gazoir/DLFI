@@ -3,6 +3,7 @@
  */
 
 import { MODULE_ID } from "../constants.mjs";
+import { getFilePicker, isNotFoundError } from "./filePicker.mjs";
 
 /**
  * Ensure a Data/ folder path exists (create parents as needed).
@@ -18,14 +19,14 @@ export async function ensureDataFolder(folderPath) {
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
     try {
-      await FilePicker.createDirectory("data", current, { notify: false });
+      await getFilePicker().createDirectory("data", current, { notify: false });
     } catch (error) {
       const message = String(error?.message ?? error ?? "");
       if (/exist|EEXIST|already/i.test(message)) {
         continue;
       }
       try {
-        await FilePicker.browse("data", current);
+        await getFilePicker().browse("data", current);
       } catch (browseError) {
         console.warn(`${MODULE_ID} | could not ensure folder ${current}`, error, browseError);
         throw error;
@@ -89,7 +90,7 @@ export function packageImportRoot(manifest, sourceLabel = "") {
  */
 export function pickDataFolder(current = "") {
   return new Promise((resolve) => {
-    const FP = foundry.applications?.apps?.FilePicker ?? globalThis.FilePicker;
+    const FP = getFilePicker();
     let settled = false;
     const finish = (path) => {
       if (settled) {
@@ -130,12 +131,17 @@ export async function deleteDataFile(path) {
   if (!target) {
     return false;
   }
+  const FP = getFilePicker();
   try {
-    if (typeof FilePicker.deletePath === "function") {
-      await FilePicker.deletePath("data", target);
+    if (typeof FP.deletePath === "function") {
+      await FP.deletePath("data", target);
       return true;
     }
   } catch (error) {
+    if (isNotFoundError(error)) {
+      console.debug(`${MODULE_ID} | already gone (404): ${target}`);
+      return true;
+    }
     console.warn(`${MODULE_ID} | FilePicker.deletePath failed for ${target}`, error);
   }
   try {
@@ -151,8 +157,16 @@ export async function deleteDataFile(path) {
     if (response.ok) {
       return true;
     }
+    if (response.status === 404) {
+      console.debug(`${MODULE_ID} | already gone (404): ${target}`);
+      return true;
+    }
     console.warn(`${MODULE_ID} | filesystem delete failed for ${target}`, response.status);
   } catch (error) {
+    if (isNotFoundError(error)) {
+      console.debug(`${MODULE_ID} | already gone (404): ${target}`);
+      return true;
+    }
     console.warn(`${MODULE_ID} | could not delete ${target}`, error);
   }
   return false;
@@ -168,9 +182,9 @@ export async function uploadDataFile(folderPath, fileName, bytes, { contentType 
   const blob = bytes instanceof Blob ? bytes : new Blob([bytes], { type: contentType || "application/octet-stream" });
   const file = new File([blob], name, { type: blob.type || contentType || "application/octet-stream" });
   try {
-    await FilePicker.upload("data", folder, file, {}, { notify: false });
+    await getFilePicker().upload("data", folder, file, {}, { notify: false });
   } catch (_error) {
-    await FilePicker.upload("data", folder, file, { notify: false });
+    await getFilePicker().upload("data", folder, file, { notify: false });
   }
   return folder ? `${folder}/${name}` : name;
 }
