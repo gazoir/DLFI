@@ -63,12 +63,14 @@ const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = awa
   "./damageFormula.mjs"
 );
 const {
+  buildChallengeHostLocations,
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
   formatPoisBulletList,
   locationDescriptionText,
   locationPois,
   locationSessionNotesText,
+  resolveChallengeHostLocationId,
   resolveColourBattlemapPath,
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
 } = await import("./packageLinks.mjs");
@@ -348,6 +350,62 @@ for (const path of paths) {
   assert(!String(path).includes("grid"), "do not use grid overlay art");
 }
 
+// DLCE v2: battlemaps live under assets/location/battlemaps/{locationId}
+{
+  const uploaded = new Map([
+    [
+      "assets/location/battlemaps/loc_village_approach.webp",
+      "dlfi-imports/pkg/assets/location/battlemaps/loc_village_approach.webp"
+    ],
+    [
+      "assets/location/loc_village_approach.webp",
+      "dlfi-imports/pkg/assets/location/loc_village_approach.webp"
+    ]
+  ]);
+  const path = resolveColourBattlemapPath({
+    entry: { id: "ch_s000_challenge", name: "Invisible Whispers", battlemap: null, locationIds: [] },
+    raw: { fields: { kind: "combat" }, links: [] },
+    locationEntry: {
+      id: "loc_village_approach",
+      battlemap: "assets/location/battlemaps/loc_village_approach.webp"
+    },
+    uploaded,
+    assetPaths: [...uploaded.keys()]
+  });
+  assert(
+    path === "dlfi-imports/pkg/assets/location/battlemaps/loc_village_approach.webp",
+    `location battlemap folder (got ${path})`
+  );
+
+  const hosts = buildChallengeHostLocations(
+    [{ id: "loc_village_approach", file: "documents/loc_village_approach.json" }],
+    (file) =>
+      file === "documents/loc_village_approach.json"
+        ? {
+            links: [
+              {
+                relation: "hosts",
+                target_id: "ch_s000_challenge",
+                target_type: "challenge"
+              }
+            ]
+          }
+        : null
+  );
+  assert(
+    hosts.get("ch_s000_challenge")?.[0] === "loc_village_approach",
+    "reverse host location from location→challenge link"
+  );
+  assert(
+    resolveChallengeHostLocationId(
+      { id: "ch_s000_challenge", locationIds: [] },
+      { links: [] },
+      hosts
+    ) === "loc_village_approach",
+    "resolveChallengeHostLocationId uses reverse hosts"
+  );
+}
+
 // Storage path helpers
 {
   const manifest = {
@@ -475,12 +533,17 @@ for (const path of paths) {
 {
   assert(padSceneOrder(1) === "01" && padSceneOrder(12) === "12", "padSceneOrder");
   assert(
-    formatSceneDmName("location", { name: "Dock" }, 1) === "01. Dock",
+    formatSceneDmName("location", { name: "Dock" }, 1) === "01. 📍 Dock",
     "location DM name"
   );
   assert(
-    formatSceneDmName("battlemap", { name: "Ambush" }, 2) === "02. Battle — Ambush",
+    formatSceneDmName("battlemap", { name: "Ambush" }, 2) === "02. ⚔️ Ambush",
     "battlemap DM name"
+  );
+  assert(
+    formatSceneDmName("battlemap", { name: "Invisible Whispers" }, 2) ===
+      "02. ⚔️ Invisible Whispers",
+    "battlemap emoji name format"
   );
   assert(
     isCombatChallengeEntry({ type: "challenge", subtype: "combat" }, { fields: { kind: "combat" } }),
@@ -569,12 +632,50 @@ for (const path of paths) {
   );
   assert(
     formatSceneDmName(unified[1].kind, unified[1].entry, unified[1].order) ===
-      "02. Battle — Ambush",
+      "02. ⚔️ Ambush",
     "unified battlemap keeps sequential DM name"
+  );
+
+  // Reverse hosts: combat with empty locationIds still interleaves after host location
+  const reverseHostDocs = {
+    "documents/loc_a.json": {
+      links: [{ target_type: "challenge", target_id: "ch_ambush", relation: "hosts" }]
+    },
+    "documents/ch_ambush.json": { fields: { kind: "combat" } },
+    "documents/ch_talk.json": { fields: { kind: "dialogue" } },
+    "documents/ch_brawl.json": { fields: { kind: "combat" } }
+  };
+  const reverseSeq = buildMsdSceneSequence(
+    {
+      documents: [
+        { id: "loc_a", type: "location", name: "LocA", file: "documents/loc_a.json", msdOrder: 1 },
+        { id: "loc_b", type: "location", name: "LocB", file: "documents/loc_b.json", msdOrder: 2 },
+        {
+          id: "ch_ambush",
+          type: "challenge",
+          name: "Ambush",
+          file: "documents/ch_ambush.json",
+          locationIds: []
+        },
+        {
+          id: "ch_talk",
+          type: "challenge",
+          name: "Talk",
+          file: "documents/ch_talk.json",
+          locationIds: [],
+          subtype: "dialogue"
+        }
+      ]
+    },
+    { readDocument: (file) => reverseHostDocs[file] ?? null }
+  );
+  assert(
+    reverseSeq.map((row) => row.entry.id).join(",") === "loc_a,ch_ambush,loc_b",
+    `reverse-host sequence (got ${reverseSeq.map((r) => r.entry.id).join(",")})`
   );
 }
 
-// MSD → Foundry journal: title/h2/h3 UUID links + portrait inject
+// MSD → Foundry journal: title/h2 UUID links + ../assets rewrite + challenge h2
 {
   const msdHtml = `<!doctype html>
 <article class="dlce-v2-msd-page dlce-v2-msd-title-page" data-msd-session-title="Misty Lake">
@@ -584,10 +685,12 @@ for (const path of paths) {
 </article>
 <div class="dlce-v2-msd-flow-source" hidden aria-hidden="true">
   <section class="dlce-v2-msd-location" data-msd-location-id="loc_a" data-msd-host-id="loc_a" data-msd-label="LocA" draggable="true">
-    <div class="dlce-v2-msd-h2" role="heading" aria-level="2">📍 LocA</div>
+    <div class="dlce-v2-msd-h2" role="heading" aria-level="2"><h2>📍 LocA</h2></div>
+    <img class="dlce-v2-msd-art is-location" src="../assets/location/loc_a.webp" alt="LocA">
     <p class="dlce-v2-msd-body">See <span data-msd-related-id="npc_kira">Kira</span>.</p>
-    <section class="dlce-v2-msd-child" data-msd-wd-id="ch_ambush" data-msd-label="Ambush" draggable="true">
-      <div class="dlce-v2-msd-h3" role="heading" aria-level="3">⚔️ Ambush</div>
+    <section class="dlce-v2-msd-child is-challenge" data-msd-wd-id="ch_ambush" data-msd-label="Ambush" draggable="true">
+      <div class="dlce-v2-msd-h3" role="heading" aria-level="3"><p>⚔️ Ambush</p></div>
+      <img src="../assets/location/battlemaps/loc_a.webp" alt="Ambush map">
     </section>
   </section>
 </div>
@@ -599,7 +702,11 @@ for (const path of paths) {
     ["npc_kira", "Actor.kira"]
   ]);
   const uploaded = new Map([
-    ["assets/location/loc_a.webp", "dlfi-imports/pkg/assets/location/loc_a.webp"]
+    ["assets/location/loc_a.webp", "dlfi-imports/pkg/assets/location/loc_a.webp"],
+    [
+      "assets/location/battlemaps/loc_a.webp",
+      "dlfi-imports/pkg/assets/location/battlemaps/loc_a.webp"
+    ]
   ]);
   const documents = [
     { id: "loc_a", type: "location", name: "LocA", portrait: "assets/location/loc_a.webp" },
@@ -608,19 +715,25 @@ for (const path of paths) {
   const journal = convertMsdHtmlForFoundry(msdHtml, { createdByDlceId, uploaded, documents });
   assert(/<h1\b[^>]*>Misty Lake<\/h1>/.test(journal), "title session name promoted to h1");
   assert(/<h1\b[^>]*>Contents<\/h1>/.test(journal), "msd h1 div promoted");
+  assert(!/<h2><h2>/.test(journal), "nested location h2 flattened");
   assert(
     journal.includes("@UUID[Scene.locA]{LocA}"),
     "location h2 linked to scene UUID"
   );
   assert(
-    journal.includes("@UUID[Scene.ambush]{Ambush}"),
-    "challenge h3 linked to battlemap UUID"
+    /<h2\b[^>]*>@UUID\[Scene\.ambush\]\{Ambush\}<\/h2>/.test(journal),
+    "challenge heading promoted to h2 with UUID"
   );
   assert(journal.includes("@UUID[Actor.kira]{Kira}"), "related-id span → @UUID");
   assert(
     /src="dlfi-imports\/pkg\/assets\/location\/loc_a\.webp"/.test(journal),
-    "portrait injected with uploaded path"
+    "../assets location art rewritten"
   );
+  assert(
+    /src="dlfi-imports\/pkg\/assets\/location\/battlemaps\/loc_a\.webp"/.test(journal),
+    "../assets battlemap art rewritten"
+  );
+  assert(!/\.\.\/assets\//.test(journal), "no leftover ../assets paths");
   assert(!/dlce-v2-msd-title-logo/.test(journal), "logo overlay stripped");
   assert(!/\bdraggable=/.test(journal), "draggable attrs stripped");
   assert(!/\bhidden\b/.test(journal) || !/flow-source/.test(journal), "flow chrome unwrapped");

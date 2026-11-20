@@ -16,6 +16,7 @@ import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
+  buildChallengeHostLocations,
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
   collectNpcLocationIds,
@@ -23,6 +24,7 @@ import {
   locationDescriptionText,
   locationPois,
   locationSessionNotesText,
+  resolveChallengeHostLocationId,
   resolveColourBattlemapPath
 } from "./packageLinks.mjs";
 import {
@@ -259,6 +261,7 @@ export async function importSessionPackage(loaded, options = {}) {
         /^assets\/battlemaps\//i.test(path) || /^assets\/location\/battlemaps\//i.test(path)
     )
   ];
+  const challengeHostLocations = buildChallengeHostLocations(locations, readDocument);
   /** @type {Array<{ scene: Scene, entry: object, raw: object|null }>} */
   const battlemapMeta = [];
   const sceneSequence = buildMsdSceneSequence(manifest, { readDocument });
@@ -311,7 +314,7 @@ export async function importSessionPackage(loaded, options = {}) {
 
     // battlemap
     const raw = step.raw ?? readDocument(entry.file);
-    const locId = (entry.locationIds ?? [])[0];
+    const locId = resolveChallengeHostLocationId(entry, raw, challengeHostLocations);
     const locEntry =
       (manifest.documents ?? []).find((d) => d.id === locId && d.type === "location") ?? null;
     const mapPath = resolveColourBattlemapPath({

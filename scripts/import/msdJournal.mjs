@@ -62,6 +62,8 @@ export function extractMsdSingleColumn(html) {
 
 /**
  * Promote `.dlce-v2-msd-h1/h2/h3` divs (and title session name) to real headings.
+ * Location + combat-challenge headings become `<h2>` so Foundry's journal ToC
+ * can jump between them. Nested `<h2>`/`<p>` wrappers from the MSD are flattened.
  *
  * @param {string} html
  * @returns {string}
@@ -72,16 +74,43 @@ export function promoteMsdHeadingDivs(html) {
   // Title card session name → h1 (Foundry journal title signal).
   next = next.replace(
     /<div\b([^>]*\bdlce-v2-msd-title-session-name\b[^>]*)>([\s\S]*?)<\/div>/gi,
-    (_match, attrs, inner) => `<h1${stripRoleHeadingAttrs(attrs)}>${inner}</h1>`
+    (_match, attrs, inner) =>
+      `<h1${stripRoleHeadingAttrs(attrs)}>${flattenHeadingInner(inner)}</h1>`
+  );
+
+  // Combat challenge children: promote their h3 wrappers to h2 for journal nav.
+  next = next.replace(
+    /<(section)\b([^>]*\bis-challenge\b[^>]*)>([\s\S]*?)<\/\1>/gi,
+    (_match, tag, attrs, inner) => {
+      const promoted = String(inner).replace(
+        /<div\b([^>]*\bdlce-v2-msd-h3\b[^>]*)>([\s\S]*?)<\/div>/i,
+        (_h, hAttrs, hInner) =>
+          `<h2${stripRoleHeadingAttrs(hAttrs)}>${flattenHeadingInner(hInner)}</h2>`
+      );
+      return `<${tag}${attrs}>${promoted}</${tag}>`;
+    }
   );
 
   next = next.replace(
     /<div\b([^>]*\bdlce-v2-msd-h([123])\b[^>]*)>([\s\S]*?)<\/div>/gi,
     (_match, attrs, level, inner) =>
-      `<h${level}${stripRoleHeadingAttrs(attrs)}>${inner}</h${level}>`
+      `<h${level}${stripRoleHeadingAttrs(attrs)}>${flattenHeadingInner(inner)}</h${level}>`
   );
 
   return next;
+}
+
+/**
+ * Unwrap a single nested heading/paragraph so we do not emit `<h2><h2>…</h2></h2>`.
+ * @param {string} inner
+ */
+function flattenHeadingInner(inner) {
+  const trimmed = String(inner ?? "").trim();
+  const nested = trimmed.match(/^<(h[1-6]|p)\b[^>]*>([\s\S]*)<\/\1>$/i);
+  if (nested) {
+    return nested[2];
+  }
+  return inner;
 }
 
 /**
@@ -235,6 +264,7 @@ function rewriteRelatedIdSpans(html, createdByDlceId) {
 
 /**
  * Rewrite `<img src>` values that match package-relative uploaded paths.
+ * MSD HTML uses paths relative to `msd/msd.html` (`../assets/...`).
  *
  * @param {string} html
  * @param {Map<string, string>} uploaded
@@ -247,14 +277,43 @@ function rewriteImageSources(html, uploaded) {
   return String(html ?? "").replace(
     /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/gi,
     (match, prefix, src, suffix) => {
-      const key = normalizePackagePath(src);
-      const world = uploaded.get(key) || uploaded.get(src);
+      const world = resolveUploadedImageSrc(src, uploaded);
       if (!world) {
         return match;
       }
       return `${prefix}${escapeHtml(world)}${suffix}`;
     }
   );
+}
+
+/**
+ * Map an MSD/img src onto an uploaded world Data path.
+ * @param {string} src
+ * @param {Map<string, string>} uploaded
+ * @returns {string|null}
+ */
+function resolveUploadedImageSrc(src, uploaded) {
+  const raw = String(src || "").trim();
+  if (!raw || raw.startsWith("data:") || /^https?:\/\//i.test(raw)) {
+    return raw.startsWith("data:") || /^https?:\/\//i.test(raw) ? raw : null;
+  }
+  if (uploaded.has(raw)) {
+    return uploaded.get(raw);
+  }
+  const key = normalizePackagePath(raw);
+  if (uploaded.has(key)) {
+    return uploaded.get(key);
+  }
+  // Basename fallback (e.g. same file under assets/location/ vs portraits/).
+  const base = key.split("/").pop();
+  if (base) {
+    for (const [packagePath, worldPath] of uploaded.entries()) {
+      if (String(packagePath).split("/").pop() === base) {
+        return worldPath;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -349,10 +408,18 @@ function stripTags(value) {
 }
 
 function normalizePackagePath(src) {
-  return String(src ?? "")
-    .replace(/^\/+/, "")
-    .replace(/^\.\//, "")
-    .replace(/\\/g, "/");
+  let next = String(src ?? "")
+    .trim()
+    .replace(/\\/g, "/")
+    .split(/[?#]/)[0];
+  // MSD lives under msd/, so artwork is referenced as ../assets/...
+  while (next.startsWith("../")) {
+    next = next.slice(3);
+  }
+  while (next.startsWith("./")) {
+    next = next.slice(2);
+  }
+  return next.replace(/^\/+/, "");
 }
 
 function escapeHtml(value) {

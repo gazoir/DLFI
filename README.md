@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.15`)
+## Status (`0.1.16`)
 
 Working in this slice:
 
@@ -14,8 +14,9 @@ Working in this slice:
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
 - Uploads package assets under `Data/dlfi-imports/…` (plus top-level `Landing Page/` slides)
 - Location / Landing / Battlemap / Leftovers scenes (configured templates, or bundled Expo/Landing/Battlemap defaults when unset)
-- **MSD scene order:** location + combat battlemap scenes share one sequence (`01. Name`, `02. Battle — Name`) from unified `msdOrder` when present, else locations then linked combats; non-combat challenges excluded
-- **MSD journal:** package HTML → Foundry single-column page (real headings, portraits, `@UUID` links); see `docs/DLCE_AGENT_BRIEF_MSD_FOUNDRY.md`
+- **MSD scene order:** location + combat battlemap scenes share one sequence (`01. 📍 Name`, `02. ⚔️ Name`) from unified `msdOrder` when present, else locations then linked combats (including reverse location→challenge hosts); non-combat challenges excluded
+- **Battlemap backgrounds:** resolve colour maps from `assets/location/battlemaps/{locationId}` (DLCE v2) via host location, not only legacy `assets/battlemaps/`
+- **MSD journal:** package HTML → Foundry single-column page (location + challenge `<h2>` for ToC, `../assets/…` → uploaded world paths, `@UUID` links); see `docs/DLCE_AGENT_BRIEF_MSD_FOUNDRY.md`
 - **Landing Page art:** DLCE exports Clean / Logo_Burn / Logo_Only / Title_Only under `Landing Page/`; DLFI uses **Logo_Burn** as the Landing scene background and keeps the other slides in the import tree for manual placement
 - **DLCE inbox** (`Data/dlce-inbox`): zip-only, auto-created, Browse… picker, nested as `Session Code · Session Name`, keeps 3 newest zips per session
 - **DLFI imports** (`Data/dlfi-imports`): separate tree mirroring the Session Package zip layout under `assets/` (ready for DLCE WD-type folders)

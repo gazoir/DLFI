@@ -39,7 +39,7 @@ export function isCombatChallengeEntry(entry, raw = null) {
 }
 
 /**
- * DM-facing scene name: `01. Name` or `02. Battle — Name`.
+ * DM-facing scene name: `01. 📍 Name` or `02. ⚔️ Name`.
  *
  * @param {"location"|"battlemap"|string} kind
  * @param {{ name?: string }} entry
@@ -49,10 +49,8 @@ export function isCombatChallengeEntry(entry, raw = null) {
 export function formatSceneDmName(kind, entry, order) {
   const padded = padSceneOrder(order);
   const name = String(entry?.name ?? "").trim() || "Untitled";
-  if (kind === "battlemap") {
-    return `${padded}. Battle — ${name}`;
-  }
-  return `${padded}. ${name}`;
+  const emoji = kind === "battlemap" ? "⚔️" : "📍";
+  return `${padded}. ${emoji} ${name}`;
 }
 
 function hasUsableMsdOrder(entry) {
@@ -117,16 +115,41 @@ export function buildMsdSceneSequence(manifest, { readDocument } = {}) {
 
     const usedCombatIds = new Set();
     rows = [];
+    /** @type {Map<string, string[]>} challengeId → locationIds from reverse hosts */
+    const reverseHosts = new Map();
+    for (const location of sortedLocations) {
+      const locRaw =
+        typeof readDocument === "function" && location.file
+          ? readDocument(location.file)
+          : null;
+      for (const link of locRaw?.links ?? []) {
+        if (link?.target_type !== "challenge" || !link?.target_id) {
+          continue;
+        }
+        const challengeId = String(link.target_id);
+        const list = reverseHosts.get(challengeId) ?? [];
+        if (!list.includes(String(location.id))) {
+          list.push(String(location.id));
+        }
+        reverseHosts.set(challengeId, list);
+      }
+    }
 
     for (const location of sortedLocations) {
       rows.push({ kind: "location", entry: location });
       const linked = combats
-        .filter(({ entry }) => {
+        .filter(({ entry, raw }) => {
           if (usedCombatIds.has(entry.id)) {
             return false;
           }
-          const locationIds = entry.locationIds ?? [];
-          return locationIds.map(String).includes(String(location.id));
+          const locationIds = [
+            ...(entry.locationIds ?? []).map(String),
+            ...((raw?.links ?? [])
+              .filter((link) => link?.target_type === "location" && link?.target_id)
+              .map((link) => String(link.target_id)) ?? []),
+            ...(reverseHosts.get(String(entry.id)) ?? [])
+          ];
+          return locationIds.includes(String(location.id));
         })
         .sort((left, right) =>
           String(left.entry.name || "").localeCompare(String(right.entry.name || ""))

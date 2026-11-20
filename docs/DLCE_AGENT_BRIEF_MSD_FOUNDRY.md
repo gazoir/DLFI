@@ -1,6 +1,6 @@
 # DLCE agent brief — MSD order + Foundry journal package
 
-DLFI **0.1.15+** imports location and combat-battlemap scenes in **MSD appearance order**, and converts package `msd/msd.html` into a single-column Foundry journal with real headings, portraits, and `@UUID` links.
+DLFI **0.1.16+** imports location and combat-battlemap scenes in **MSD appearance order**, applies battlemap backgrounds from `assets/location/battlemaps/`, and converts package `msd/msd.html` into a single-column Foundry journal with real `<h2>` headings (locations + challenges), rewritten `../assets/…` image paths, portraits, and `@UUID` links.
 
 This brief is for the **DLCE** export side. Keep package contract changes additive.
 
@@ -49,6 +49,8 @@ Also keep exporting per-document `session_note` on document JSON (already done v
 
 ## DLFI behaviour (reference)
 
-- Scene DM names: `01. Location Name`, `02. Battle — Challenge Name` (zero-padded, sequential).
+- Scene DM names: `01. 📍 Location Name`, `02. ⚔️ Challenge Name` (zero-padded, sequential).
+- Battlemap backgrounds prefer the host location’s `battlemap` path under `assets/location/battlemaps/`.
+- Challenge host location resolves from `locationIds`, challenge→location links, or reverse location→challenge links.
 - Landing and Leftovers are created **after** the MSD-ordered location/battlemap loop.
 - MSD journal conversion lives in `scripts/import/msdJournal.mjs` (`convertMsdHtmlForFoundry`).
