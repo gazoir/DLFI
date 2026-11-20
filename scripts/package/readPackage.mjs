@@ -1,4 +1,5 @@
 import { MODULE_ID, PACKAGE_FORMAT_VERSIONS, notify } from "../constants.mjs";
+import { getFilePicker } from "./filePicker.mjs";
 import { normalizePackageFiles, readStoreZip } from "./storeZip.mjs";
 
 /**
@@ -66,7 +67,7 @@ export async function fetchDataFile(dataPath) {
  */
 export async function browseDataFolder(dataPath) {
   const normalized = dataPath.replace(/^\/+|\/+$/g, "") || "";
-  return FilePicker.browse("data", normalized);
+  return getFilePicker().browse("data", normalized);
 }
 
 /**

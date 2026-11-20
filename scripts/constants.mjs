@@ -2,8 +2,8 @@
 
 export const MODULE_ID = "dlfi";
 /** Accepted Session Package format versions (DLCE may bump independently). */
-export const PACKAGE_FORMAT_VERSION = 1;
-export const PACKAGE_FORMAT_VERSIONS = new Set([1, 2]);
+export const PACKAGE_FORMAT_VERSION = 3;
+export const PACKAGE_FORMAT_VERSIONS = new Set([1, 2, 3]);
 
 /** Data/ folder for DLCE Session Package zips only. */
 export const SETTING_INBOX = "inboxPath";

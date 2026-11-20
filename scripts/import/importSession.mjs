@@ -625,19 +625,36 @@ export async function importSessionPackage(loaded, options = {}) {
     console.warn(`${MODULE_ID} | manifest.pcs is empty — battlemaps will have no party tokens`);
   }
   for (const meta of battlemapMeta) {
-    const enemies = collectChallengeEnemies(meta.entry, meta.raw, {
+    const collected = collectChallengeEnemies(meta.entry, meta.raw, {
       npcDocuments: npcDocumentsForLinks
-    })
+    });
+    const sceneLabel = `${meta.scene?.name ?? meta.entry?.name ?? "battlemap"} (${meta.entry?.id ?? "?"})`;
+    if (!collected.length) {
+      console.warn(
+        `${MODULE_ID} | battlemap ${sceneLabel}: collectChallengeEnemies returned 0 enemies — no enemy tokens will be placed`
+      );
+    } else {
+      console.log(
+        `${MODULE_ID} | battlemap ${sceneLabel}: collected ${collected.length} enemy entr${collected.length === 1 ? "y" : "ies"}`,
+        collected.map(({ npcId, count }) => `${npcId}×${Math.max(1, Number(count) || 1)}`)
+      );
+    }
+    const enemies = collected
       .map(({ npcId, count, disposition }) => {
         const actor = actorsByDlceId.get(npcId);
         if (!actor) {
-          console.warn(`${MODULE_ID} | battlemap enemy missing actor for ${npcId}`);
+          console.warn(`${MODULE_ID} | battlemap ${sceneLabel}: enemy missing actor for ${npcId}`);
           return null;
         }
         placedNpcIds.add(npcId);
         return { actor, count, disposition };
       })
       .filter(Boolean);
+    if (collected.length && !enemies.length) {
+      console.warn(
+        `${MODULE_ID} | battlemap ${sceneLabel}: none of the ${collected.length} collected enemies resolved to an actor`
+      );
+    }
     await finalizeBattlemapScene(meta.scene, { enemies, party: partyForBattlemaps });
   }
 

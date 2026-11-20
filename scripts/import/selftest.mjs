@@ -1207,6 +1207,27 @@ for (const path of paths) {
   }
 }
 
+{
+  const { PACKAGE_FORMAT_VERSIONS } = await import("../constants.mjs");
+  assert([1, 2, 3].every((v) => PACKAGE_FORMAT_VERSIONS.has(v)), "package format versions 1-3 supported");
+
+  const { getFilePicker, isNotFoundError } = await import("../package/filePicker.mjs");
+  const { deleteDataFile: delFile } = await import("../package/dataFolders.mjs");
+  assert(isNotFoundError(new Error("404 Not Found")) && isNotFoundError({ status: 404 }), "404 errors detected");
+  assert(!isNotFoundError(new Error("permission denied")), "non-404 errors not treated as missing");
+
+  const modern = {
+    async deletePath() {
+      throw new Error("File not found (404)");
+    }
+  };
+  globalThis.foundry.applications = { apps: { FilePicker: { implementation: modern } } };
+  globalThis.FilePicker = undefined;
+  assert(getFilePicker() === modern, "FilePicker resolved via foundry.applications.apps.FilePicker.implementation");
+  assert((await delFile("assets/battlemaps/old.webp")) === true, "delete 404 treated as already removed");
+  delete globalThis.foundry.applications;
+}
+
 if (failures) {
   console.error(`\n${failures} assertion(s) failed`);
   process.exit(1);

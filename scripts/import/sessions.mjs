@@ -16,6 +16,7 @@ import {
 } from "../constants.mjs";
 import { setExclusiveSceneNavigation } from "./folders.mjs";
 import { deleteDataFile, normalizeDataPath } from "../package/dataFolders.mjs";
+import { getFilePicker, isNotFoundError } from "../package/filePicker.mjs";
 
 const SESSION_FOLDER_TYPES = ["Actor", "Item", "Scene", "JournalEntry"];
 const EXPORT_STAMP = /^\d{4}-\d{2}-\d{2}T/;
@@ -274,7 +275,7 @@ export async function purgeSessionAssets(sessionCode, importsPath) {
   const result = { dirs: [], filesDeleted: 0, filesSkipped: 0, remainingDirs: [] };
   let browse;
   try {
-    browse = await FilePicker.browse("data", root);
+    browse = await getFilePicker().browse("data", root);
   } catch (_error) {
     return result;
   }
@@ -284,8 +285,11 @@ export async function purgeSessionAssets(sessionCode, importsPath) {
   async function removeTree(dir) {
     let listing;
     try {
-      listing = await FilePicker.browse("data", dir);
-    } catch (_error) {
+      listing = await getFilePicker().browse("data", dir);
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        console.debug(`${MODULE_ID} | could not browse ${dir} during purge`, error);
+      }
       return;
     }
     for (const file of listing.files ?? []) {
@@ -312,7 +316,7 @@ export async function purgeSessionAssets(sessionCode, importsPath) {
     result.dirs.push(dir);
     await removeTree(dir);
     try {
-      await FilePicker.browse("data", dir);
+      await getFilePicker().browse("data", dir);
       result.remainingDirs.push(dir);
     } catch (_error) {
       /* directory is gone */
