@@ -6,10 +6,12 @@
  */
 
 import { FLAG_SCOPE, TOKEN_DISPOSITION } from "../constants.mjs";
+import { tokenDisplayHover } from "./tokenArt.mjs";
 
 /**
  * @param {{
  *   name?: string,
+ *   knownAs?: string|null,
  *   ddbId?: string|null,
  *   ddbUrl?: string|null,
  *   playerName?: string|null,
@@ -25,6 +27,7 @@ import { FLAG_SCOPE, TOKEN_DISPOSITION } from "../constants.mjs";
  */
 export function buildPcActorData(pc, media = {}) {
   const name = String(pc?.name || "").trim() || "Unnamed PC";
+  const knownAs = String(pc?.knownAs || "").trim() || name.split(/\s+/)[0] || name;
   const ddbUrl = String(pc?.ddbUrl || "").trim() || null;
   const ddbId =
     (pc?.ddbId != null && String(pc.ddbId).trim()) ||
@@ -53,7 +56,9 @@ export function buildPcActorData(pc, media = {}) {
     items: [],
     effects: [],
     prototypeToken: {
-      name,
+      // Default token uses Known as + Hovered by Anyone (battlemap tokens inherit).
+      name: knownAs,
+      displayName: tokenDisplayHover(),
       actorLink: true,
       disposition: TOKEN_DISPOSITION.FRIENDLY,
       width: 1,
@@ -76,6 +81,7 @@ export function buildPcActorData(pc, media = {}) {
         dlceId: pc?.id ?? null,
         ddbId,
         ddbUrl,
+        knownAs,
         playerName: pc?.playerName ?? null,
         importKey: media.importKey ?? null,
         source: "dlce-pc-stub"

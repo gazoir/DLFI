@@ -14,6 +14,7 @@ import {
   SETTING_TEMPLATE_LOCATION,
   TOKEN_DISPOSITION
 } from "../constants.mjs";
+import { tokenDisplayHover } from "./tokenArt.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import { buildPcActorData } from "./buildPcActor.mjs";
 import { applySceneBackground } from "./applySceneBackground.mjs";
@@ -546,6 +547,16 @@ export async function importSessionPackage(loaded, options = {}) {
       }
       // Re-imports: ensure matched PCs stay Friendly even if a prior stub was Hostile.
       patch["prototypeToken.disposition"] = TOKEN_DISPOSITION.FRIENDLY;
+      patch["prototypeToken.displayName"] = tokenDisplayHover();
+      const knownAs =
+        String(pc.knownAs || "").trim() ||
+        String(pc.name || actor.name || "")
+          .trim()
+          .split(/\s+/)[0] ||
+        actor.name;
+      if (knownAs) {
+        patch["prototypeToken.name"] = knownAs;
+      }
       if (Object.keys(patch).length) {
         await actor.update(patch);
       }
@@ -632,12 +643,19 @@ export async function importSessionPackage(loaded, options = {}) {
       );
       continue;
     }
+    const knownAs =
+      String(pc?.knownAs || "").trim() ||
+      String(pc?.name || actor.name || "")
+        .trim()
+        .split(/\s+/)[0] ||
+      actor.name;
     partyForBattlemaps.push({
       actor,
       linked: true,
       kind: "battle-pc",
       dlceId: pc?.id ? String(pc.id) : null,
-      label: pc?.name || actor.name
+      label: pc?.name || actor.name,
+      tokenName: knownAs
     });
     for (const petRow of sessionPets) {
       if (String(petRow.ownerPcId) !== String(pc.id || "")) {
@@ -655,7 +673,8 @@ export async function importSessionPackage(loaded, options = {}) {
         kind: "battle-pet",
         dlceId: petRow.pet?.id ? String(petRow.pet.id) : null,
         ownerPcId: String(petRow.ownerPcId || pc.id || ""),
-        label: petRow.pet?.name || petRow.actor.name
+        label: petRow.pet?.name || petRow.actor.name,
+        tokenName: petRow.pet?.name || petRow.actor.name
       });
     }
   }
