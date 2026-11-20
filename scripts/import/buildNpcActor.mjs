@@ -113,6 +113,8 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
   const tokenSrc = media.token || embedded?.prototypeToken?.texture?.src || img;
   const size = system?.traits?.size;
   const tokenSize = sizeToTokenScale(size);
+  const scale = Number(media.tokenScale);
+  const textureScale = Number.isFinite(scale) && scale > 0 ? scale : undefined;
 
   const prototypeToken = foundry.utils.mergeObject(
     embedded?.prototypeToken ? foundry.utils.duplicate(embedded.prototypeToken) : {},
@@ -121,7 +123,14 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
       actorLink: true,
       width: tokenSize,
       height: tokenSize,
-      ...(tokenSrc ? { texture: { src: tokenSrc } } : {})
+      ...(tokenSrc
+        ? {
+            texture: {
+              src: tokenSrc,
+              ...(textureScale != null ? { scaleX: textureScale, scaleY: textureScale } : {})
+            }
+          }
+        : {})
     },
     { inplace: false }
   );
