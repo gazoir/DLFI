@@ -468,7 +468,11 @@ export async function importSessionPackage(loaded, options = {}) {
   // Enemies in combat encounters are unlinked on Actor.prototypeToken (Link Actor Data off).
   const combatEnemyIds = collectCombatEnemyIds(
     battlemapMeta,
-    npcEntries.map((entry) => ({ id: entry.id, raw: npcRawById.get(entry.id) }))
+    npcEntries.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      raw: npcRawById.get(entry.id)
+    }))
   );
 
   for (const entry of npcEntries) {
@@ -601,6 +605,7 @@ export async function importSessionPackage(loaded, options = {}) {
   // Battlemap: enemies (unlinked) + party PCs/pets (linked) in bottom padding lines
   const npcDocumentsForLinks = npcRecords.map((row) => ({
     id: row.entry.id,
+    name: row.entry.name,
     raw: row.raw
   }));
   const partyForBattlemaps = [];
@@ -616,18 +621,21 @@ export async function importSessionPackage(loaded, options = {}) {
       }
     }
   }
+  if (battlemapMeta.length && !partyForBattlemaps.length) {
+    console.warn(`${MODULE_ID} | manifest.pcs is empty — battlemaps will have no party tokens`);
+  }
   for (const meta of battlemapMeta) {
     const enemies = collectChallengeEnemies(meta.entry, meta.raw, {
       npcDocuments: npcDocumentsForLinks
     })
-      .map(({ npcId, count }) => {
+      .map(({ npcId, count, disposition }) => {
         const actor = actorsByDlceId.get(npcId);
         if (!actor) {
           console.warn(`${MODULE_ID} | battlemap enemy missing actor for ${npcId}`);
           return null;
         }
         placedNpcIds.add(npcId);
-        return { actor, count };
+        return { actor, count, disposition };
       })
       .filter(Boolean);
     await finalizeBattlemapScene(meta.scene, { enemies, party: partyForBattlemaps });

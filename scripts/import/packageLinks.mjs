@@ -239,28 +239,124 @@ function scoreBattlemapPath(path) {
 }
 
 /**
- * Collect enemy NPC ids (+ optional counts) for a combat challenge.
+ * Map a DLCE `disposition` string/number onto a Foundry token disposition.
+ * hostile → -1, neutral → 0, friendly → 1, secret → -2.
  *
- * @returns {Array<{ npcId: string, count: number }>}
+ * @param {unknown} value
+ * @returns {number|undefined}
+ */
+export function tokenDispositionFromPackage(value) {
+  if (value == null || value === "") {
+    return undefined;
+  }
+  if (typeof value === "number" && [-2, -1, 0, 1].includes(value)) {
+    return value;
+  }
+  const key = String(value).trim().toLowerCase();
+  if (key === "hostile" || key === "enemy" || key === "-1") return -1;
+  if (key === "neutral" || key === "0") return 0;
+  if (key === "friendly" || key === "ally" || key === "1") return 1;
+  if (key === "secret" || key === "-2") return -2;
+  return undefined;
+}
+
+function normalizeName(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Collect enemy NPC ids (+ counts, disposition) for a combat challenge.
+ *
+ * Sources are counted independently (rows within one source add up) and then
+ * merged with `max`, so an NPC that is both linked and listed in
+ * `fields.enemies` with `count: 2` yields 2 tokens, not 3.
+ *
+ * Rows are matched by `world_document_id` first; a bare name is resolved to an
+ * NPC id through `npcDocuments` when possible.
+ *
+ * @param {object} entry
+ * @param {object} raw
+ * @param {{ npcDocuments?: Array<{ id?: string, name?: string, raw?: object }> }} [opts]
+ * @returns {Array<{ npcId: string, count: number, disposition?: number }>}
  */
 export function collectChallengeEnemies(entry, raw, { npcDocuments = [] } = {}) {
-  /** @type {Map<string, number>} */
-  const counts = new Map();
-
-  const add = (npcId, count = 1) => {
-    const id = String(npcId ?? "").trim();
+  const npcIds = new Set();
+  const npcIdByName = new Map();
+  for (const npc of npcDocuments) {
+    const npcRaw = npc.raw ?? npc;
+    const id = String(npc.id ?? npcRaw?.id ?? "").trim();
     if (!id) {
-      return;
+      continue;
     }
-    const n = Number(count);
-    counts.set(id, (counts.get(id) ?? 0) + (Number.isFinite(n) && n > 0 ? Math.floor(n) : 1));
-  };
-
-  for (const link of raw?.links ?? []) {
-    if (link?.target_type === "npc" && link?.target_id) {
-      add(link.target_id, link.count ?? link.quantity ?? 1);
+    npcIds.add(id);
+    for (const name of [npc.name, npcRaw?.name, npcRaw?.fields?.name]) {
+      const key = normalizeName(name);
+      if (key && !npcIdByName.has(key)) {
+        npcIdByName.set(key, id);
+      }
     }
   }
+
+  const resolveId = (npcId, name) => {
+    const id = String(npcId ?? "").trim();
+    if (id && (npcIds.has(id) || !npcIds.size)) {
+      return id;
+    }
+    return (
+      npcIdByName.get(normalizeName(id)) ??
+      npcIdByName.get(normalizeName(name)) ??
+      id ??
+      ""
+    );
+  };
+
+  /** @type {Map<string, { count: number, disposition?: number }>} */
+  const merged = new Map();
+
+  const makeSource = () => {
+    /** @type {Map<string, { count: number, disposition?: number }>} */
+    const rows = new Map();
+    return {
+      rows,
+      add(npcId, count = 1, disposition = undefined, name = undefined) {
+        const id = resolveId(npcId, name);
+        if (!id) {
+          return;
+        }
+        const n = Number(count);
+        const add = Number.isFinite(n) && n > 0 ? Math.floor(n) : 1;
+        const prev = rows.get(id) ?? { count: 0 };
+        rows.set(id, {
+          count: prev.count + add,
+          disposition: prev.disposition ?? disposition
+        });
+      }
+    };
+  };
+
+  const mergeSource = (source) => {
+    for (const [id, row] of source.rows) {
+      const prev = merged.get(id);
+      merged.set(id, {
+        count: Math.max(prev?.count ?? 0, row.count),
+        disposition: prev?.disposition ?? row.disposition
+      });
+    }
+  };
+
+  const linkSource = makeSource();
+  for (const link of raw?.links ?? []) {
+    if (link?.target_type === "npc" && link?.target_id) {
+      linkSource.add(
+        link.target_id,
+        link.count ?? link.quantity ?? 1,
+        tokenDispositionFromPackage(link.disposition)
+      );
+    }
+  }
+  mergeSource(linkSource);
 
   const fieldValues = [
     raw?.fields?.enemies,
@@ -273,25 +369,33 @@ export function collectChallengeEnemies(entry, raw, { npcDocuments = [] } = {}) 
     raw?.enemies
   ];
   for (const value of fieldValues) {
+    const source = makeSource();
     for (const row of normalizeEnemyField(value)) {
-      add(row.npcId, row.count);
+      source.add(row.npcId, row.count, row.disposition, row.name);
     }
+    mergeSource(source);
   }
 
   const challengeId = String(entry?.id ?? "");
   if (challengeId) {
+    const reverse = makeSource();
     for (const npc of npcDocuments) {
       const npcRaw = npc.raw ?? npc;
       const npcId = String(npc.id ?? npcRaw?.id ?? "");
       for (const link of npcRaw?.links ?? []) {
         if (link?.target_type === "challenge" && String(link.target_id) === challengeId) {
-          add(npcId, link.count ?? 1);
+          reverse.add(npcId, link.count ?? 1);
         }
       }
     }
+    mergeSource(reverse);
   }
 
-  return [...counts.entries()].map(([npcId, count]) => ({ npcId, count }));
+  return [...merged.entries()].map(([npcId, row]) => ({
+    npcId,
+    count: row.count,
+    ...(row.disposition !== undefined ? { disposition: row.disposition } : {})
+  }));
 }
 
 /**
@@ -341,9 +445,27 @@ function normalizeEnemyField(value) {
       if (!row || typeof row !== "object") {
         return null;
       }
-      const npcId = row.npcId ?? row.id ?? row.target_id ?? row.enemy_id ?? row.name;
+      // DLCE: { world_document_id, name, level, count, disposition } — WD id beats name.
+      const npcId =
+        row.world_document_id ??
+        row.worldDocumentId ??
+        row.npcId ??
+        row.npc_id ??
+        row.id ??
+        row.target_id ??
+        row.enemy_id ??
+        row.name;
       const count = row.count ?? row.quantity ?? row.qty ?? 1;
-      return npcId ? { npcId: String(npcId), count } : null;
+      if (!npcId) {
+        return null;
+      }
+      const disposition = tokenDispositionFromPackage(row.disposition);
+      return {
+        npcId: String(npcId),
+        count,
+        name: row.name != null ? String(row.name) : undefined,
+        ...(disposition !== undefined ? { disposition } : {})
+      };
     })
     .filter(Boolean);
 }

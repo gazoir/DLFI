@@ -533,6 +533,79 @@ for (const path of paths) {
   assert(byId.npc_c === 1, "enemy from NPC→challenge link");
 }
 
+// DLCE-shaped enemy rows: world_document_id wins over name; count honored; no double count with link
+{
+  const npcDocuments = [
+    { id: "npc_imp", name: "Imp", raw: { id: "npc_imp", name: "Imp" } },
+    { id: "npc_devil", name: "Devil", raw: { id: "npc_devil", name: "Devil" } }
+  ];
+  const enemies = collectChallengeEnemies(
+    { id: "ch_fight" },
+    {
+      links: [{ target_type: "npc", target_id: "npc_imp" }],
+      fields: {
+        enemies: [
+          {
+            world_document_id: "npc_imp",
+            name: "Imp",
+            level: 1,
+            count: 2,
+            disposition: "hostile"
+          },
+          { world_document_id: "npc_devil", name: "Devil", level: 3, count: 1, disposition: "hostile" }
+        ]
+      }
+    },
+    { npcDocuments }
+  );
+  const byId = Object.fromEntries(enemies.map((e) => [e.npcId, e]));
+  assert(byId.npc_imp?.count === 2, "world_document_id row count honored (link not double-counted)");
+  assert(byId.npc_devil?.count === 1, "second DLCE enemy row");
+  assert(!byId.Imp && !byId.Devil, "no name-keyed enemy ids when world_document_id present");
+  assert(byId.npc_imp.disposition === -1, "hostile disposition mapped to -1");
+
+  // JSON-string field (DLCE sometimes stores fields as strings)
+  const fromString = collectChallengeEnemies(
+    { id: "ch_x" },
+    { fields: { enemies: JSON.stringify([{ world_document_id: "npc_imp", name: "Imp", count: 3 }]) } },
+    { npcDocuments }
+  );
+  assert(fromString[0]?.npcId === "npc_imp" && fromString[0].count === 3, "JSON string enemies");
+
+  // Name-only row resolves to NPC id through npcDocuments
+  const byName = collectChallengeEnemies(
+    { id: "ch_y" },
+    { fields: { enemies: [{ name: "Imp", count: 2 }] } },
+    { npcDocuments }
+  );
+  assert(byName[0]?.npcId === "npc_imp" && byName[0].count === 2, "name fallback resolves to NPC id");
+
+  const { tokenDispositionFromPackage } = await import("./packageLinks.mjs");
+  assert(tokenDispositionFromPackage("hostile") === -1, "hostile → -1");
+  assert(tokenDispositionFromPackage("friendly") === 1, "friendly → 1");
+  assert(tokenDispositionFromPackage("neutral") === 0, "neutral → 0");
+  assert(tokenDispositionFromPackage(undefined) === undefined, "missing disposition");
+
+  const spec = tokenPlacementSpec({
+    actor: { id: "a", uuid: "Actor.a", name: "Imp", prototypeToken: {} },
+    linked: false,
+    kind: "battle-enemy",
+    disposition: byId.npc_imp.disposition
+  });
+  const layout = layoutBattlemapRosterLines({
+    metrics: { width: 4000, height: 3000, sceneWidth: 4000, sceneHeight: 2000, sceneX: 0, sceneY: 0, mapBottom: 2000, canvasBottom: 3000, gridSize: 100 },
+    grid: 100,
+    enemySpecs: [spec],
+    partySpecs: [
+      { name: "Ibby", actorId: "pc", actorUuid: "Actor.pc", linked: true, kind: "battle-pc", width: 1, height: 1 }
+    ]
+  });
+  assert(layout.enemyTokens[0].disposition === -1, "enemy token disposition hostile");
+  assert(layout.enemyTokens[0].actorLink === false, "enemy token unlinked");
+  assert(layout.partyTokens[0].actorLink === true, "PC token linked");
+  assert(layout.partyTokens[0].disposition === undefined, "PC token disposition untouched");
+}
+
 // Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded
 {
   assert(padSceneOrder(1) === "01" && padSceneOrder(12) === "12", "padSceneOrder");
