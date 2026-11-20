@@ -15,7 +15,11 @@
 
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
 import { resolvePcKnownAs } from "./buildPcActor.mjs";
-import { pickTokenTexture, tokenDisplayHover } from "./tokenArt.mjs";
+import {
+  pickTokenTexture,
+  tokenDisplayAlways,
+  tokenDisplayHover
+} from "./tokenArt.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
@@ -647,7 +651,7 @@ async function placePcsOnScene(scene, pcs, slots) {
       actorId: actor.id,
       actorLink: true,
       disposition: TOKEN_DISPOSITION.FRIENDLY,
-      displayName: tokenDisplayHover(),
+      displayName: tokenDisplayAlways(),
       ...(textureSrc ? { "texture.src": textureSrc } : {}),
       flags: {
         ...(token.flags ?? {}),
@@ -684,7 +688,7 @@ async function placePcsOnScene(scene, pcs, slots) {
       actorId: actor.id,
       actorLink: true,
       disposition: TOKEN_DISPOSITION.FRIENDLY,
-      displayName: tokenDisplayHover(),
+      displayName: tokenDisplayAlways(),
       width,
       height,
       x,

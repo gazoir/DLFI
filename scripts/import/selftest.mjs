@@ -760,6 +760,7 @@ for (const path of paths) {
 
 // Landing PC slots use the same Known as resolution as battlemap / prototype
 {
+  const { tokenDisplayAlways, TOKEN_DISPLAY_ALWAYS } = await import("./tokenArt.mjs");
   assert(
     resolvePcKnownAs(
       { name: "Isabella Brightblade", knownAs: "Ibby" },
@@ -779,6 +780,8 @@ for (const path of paths) {
       "Isabella",
     "Landing falls back to first name"
   );
+  assert(TOKEN_DISPLAY_ALWAYS === 50, "Foundry ALWAYS display mode is 50");
+  assert(tokenDisplayAlways() === 50, "Landing nameplates use Always Visible");
 }
 
 // Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded
