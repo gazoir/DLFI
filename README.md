@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.22`)
+## Status (`0.1.23`)
 
 Working in this slice:
 
@@ -17,7 +17,7 @@ Working in this slice:
 - **MSD scene order:** location + combat battlemap scenes share one sequence (`01. 📍 Name`, `02. ⚔️ Name`) from unified `msdOrder` when present, else locations then linked combats (including reverse location→challenge hosts); non-combat challenges excluded
 - **Battlemap backgrounds:** resolve colour maps from `assets/location/battlemaps/{locationId}` (DLCE v2) via host location, not only legacy `assets/battlemaps/`
 - **MSD journal:** package HTML → Foundry single-column page (location + challenge `<h2>` for ToC, `../assets/…` → uploaded world paths, `@UUID` links); see `docs/DLCE_AGENT_BRIEF_MSD_FOUNDRY.md`
-- **Landing Page art:** DLCE exports Clean / Logo_Burn / Logo_Only / Title_Only under `Landing Page/`; DLFI uses **Logo_Burn** as the Landing scene background and keeps the other slides in the import tree for manual placement
+- **Landing Page art:** DLCE exports Clean / Logo_Burn / Logo_Only / Title_Only under `Landing Page/`; DLFI uses **Clean** as the Landing scene background and swaps template tiles named **Logo Only** / **Title Only** with those PNGs (Logo_Burn kept on disk / BG fallback)
 - **DLCE inbox** (`Data/dlce-inbox`): zip-only, auto-created, Browse… picker, nested as `Session Code · Session Name`, keeps 3 newest zips per session
 - **DLFI imports** (`Data/dlfi-imports`): separate tree mirroring the Session Package zip layout under `assets/` (ready for DLCE WD-type folders)
 - Template placement: fill dedicated Location drawings — **Description** (description/appearance), **POIs** (bullet list), **Session Notes** — delete empty/unused boxes (incl. legacy Description 4); bind NPCs to `1A#` slots (actor + token art) including reverse location→NPC links; Landing PCs only on `{partySize}P{seat}` placeholders (keep template x/y/scale; 2→`4P2`+`4P3`, 3–6→that row, 7+→`6P*` + overflow; delete unused `nPm` rows; ignore non-`nPm` tokens)
@@ -32,6 +32,7 @@ Working in this slice:
 - **0.1.20:** format v3 accepted without warning; FilePicker resolved via `foundry.applications.apps.FilePicker.implementation` (V13+/V15-safe); battlemap enemy collect/placement logged (counts + npc ids, warnings when empty); 404 on asset purge treated as already deleted
 - **0.1.21:** battlemap party placement logs skipped PC/pet ids and reasons when `manifest.pcs` is non-empty but tokens are not placed
 - **0.1.22:** Landing PC placement picks the party-size `{n}P*` row from the world Landing template (2→centred `4P2`/`4P3`; 7+ overflows past `6P6`); keeps template position/scale; PCs only
+- **0.1.23:** Landing background = Clean; Logo Only / Title Only art replace named template tiles
 
 Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 
@@ -54,10 +55,10 @@ DLCE may include a `Landing Page/` folder (also listed under `manifest.landingPa
 
 | File | Role |
 |------|------|
-| `*_Clean.*` | Raw session image |
-| `*_Logo_Burn.*` | Logo + title burned in → **Landing scene background** |
-| `*_Logo_Only.*` | Full 16:9 logo on transparency (drop onto scenes) |
-| `*_Title_Only.*` | Full 16:9 title on transparency (drop onto scenes) |
+| `*_Clean.*` | Raw session image → **Landing scene background** |
+| `*_Logo_Burn.*` | Logo + title burned in (on disk; BG fallback if Clean missing) |
+| `*_Logo_Only.*` | Full 16:9 logo → template tile named **Logo Only** |
+| `*_Title_Only.*` | Full 16:9 title → template tile named **Title Only** |
 
 Legacy `manifest.sessionArt` still works as a Clean/background fallback.
 

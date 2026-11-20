@@ -35,6 +35,7 @@ import {
   resolveNpcMedia
 } from "./resolvePackageAsset.mjs";
 import {
+  applyLandingPageTiles,
   resolveLandingPageArt,
   shouldUploadPackagePath
 } from "./resolveLandingArt.mjs";
@@ -379,7 +380,7 @@ export async function importSessionPackage(loaded, options = {}) {
   const reverseNpcLocations = buildNpcLocationsFromLocationLinks(locations, readDocument);
 
   // --- Landing ---
-  // Prefer Logo_Burn from Landing Page/; keep Clean / Logo Only / Title Only on disk.
+  // Clean = scene background; Logo Only / Title Only replace named template tiles.
   const landingArt = resolveLandingPageArt(manifest, uploaded);
   let landing =
     (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`, {
@@ -415,21 +416,32 @@ export async function importSessionPackage(loaded, options = {}) {
     await applySceneBackground(landing, landingArt.background);
     console.log(
       `${MODULE_ID} | Landing background → ${landingArt.background}` +
-        (landingArt.logoBurn ? " (Logo_Burn)" : landingArt.clean ? " (Clean/sessionArt)" : "")
+        (landingArt.clean ? " (Clean)" : landingArt.logoBurn ? " (Logo_Burn fallback)" : "")
     );
   } else {
     console.warn(`${MODULE_ID} | no Landing Page / session art found for Landing background`);
   }
-  if (landingArt.logoOnly || landingArt.titleOnly || landingArt.clean) {
+  const tilesUpdated = await applyLandingPageTiles(landing, {
+    logoOnly: landingArt.logoOnly,
+    titleOnly: landingArt.titleOnly
+  });
+  if (tilesUpdated) {
     console.log(
-      `${MODULE_ID} | Landing Page slides available:`,
-      {
-        clean: landingArt.clean,
-        logoBurn: landingArt.logoBurn,
-        logoOnly: landingArt.logoOnly,
-        titleOnly: landingArt.titleOnly
-      }
+      `${MODULE_ID} | Landing tiles updated: ${tilesUpdated}` +
+        ` (logoOnly=${Boolean(landingArt.logoOnly)}, titleOnly=${Boolean(landingArt.titleOnly)})`
     );
+  } else if (landingArt.logoOnly || landingArt.titleOnly) {
+    console.warn(
+      `${MODULE_ID} | Landing has Logo/Title art but no "Logo Only"/"Title Only" tiles on the template`
+    );
+  }
+  if (landingArt.logoOnly || landingArt.titleOnly || landingArt.clean || landingArt.logoBurn) {
+    console.log(`${MODULE_ID} | Landing Page slides available:`, {
+      clean: landingArt.clean,
+      logoBurn: landingArt.logoBurn,
+      logoOnly: landingArt.logoOnly,
+      titleOnly: landingArt.titleOnly
+    });
   }
   sessionSceneIds.push(landing.id);
   landingScene = landing;

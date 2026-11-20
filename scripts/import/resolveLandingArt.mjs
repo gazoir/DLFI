@@ -3,10 +3,10 @@
  *
  * Package layout (DLCE export):
  *   Landing Page/
- *     …_Clean.webp       — raw session image
- *     …_Logo_Burn.webp   — logo + title burned in → Landing scene background
- *     …_Logo_Only.webp   — full 16:9 logo on transparency (manual tile/drop)
- *     …_Title_Only.webp  — full 16:9 title on transparency (manual tile/drop)
+ *     …_Clean.webp       — raw session image → Landing scene background
+ *     …_Logo_Burn.webp   — logo + title burned in (kept on disk / legacy BG)
+ *     …_Logo_Only.webp   — full 16:9 logo on transparency → "Logo Only" tile
+ *     …_Title_Only.webp  — full 16:9 title on transparency → "Title Only" tile
  *
  * Also accepts the same files under assets/Landing Page/, assets/session/,
  * assets/landing/, or paths named in manifest.landingPage / sessionArt.
@@ -138,8 +138,9 @@ export function resolveLandingPageArt(manifest, uploaded) {
   const titleOnly = found.titleOnly?.worldPath ?? null;
   const clean = found.clean?.worldPath ?? null;
 
-  // Landing background: Logo_Burn first, then clean / legacy sessionArt.
-  const background = logoBurn || clean || lookupUploaded(uploaded, [manifest?.sessionArt]) || null;
+  // Landing background: Clean first, then Logo_Burn / legacy sessionArt.
+  const background =
+    clean || logoBurn || lookupUploaded(uploaded, [manifest?.sessionArt]) || null;
 
   return {
     logoBurn,
@@ -154,6 +155,65 @@ export function resolveLandingPageArt(manifest, uploaded) {
       ...(found.clean ? { clean: found.clean.packagePath } : {})
     }
   };
+}
+
+/**
+ * Classify a Landing scene tile as logoOnly / titleOnly via name or texture src.
+ * @param {object} tile
+ * @returns {"logoOnly"|"titleOnly"|null}
+ */
+export function classifyLandingTile(tile) {
+  const name = String(tile?.name ?? "").trim();
+  if (/^logo\s*only$/i.test(name)) {
+    return "logoOnly";
+  }
+  if (/^title\s*only$/i.test(name)) {
+    return "titleOnly";
+  }
+  const src = String(tile?.texture?.src ?? tile?.img ?? "");
+  const fromSrc = classifyLandingFileName(src);
+  if (fromSrc === "logoOnly" || fromSrc === "titleOnly") {
+    return fromSrc;
+  }
+  return null;
+}
+
+/**
+ * Replace Landing template tiles named Logo Only / Title Only with package art.
+ * Keeps tile geometry (x/y/width/height); only swaps texture.src.
+ *
+ * @param {Scene} scene
+ * @param {{ logoOnly?: string|null, titleOnly?: string|null }} art
+ * @returns {Promise<number>} number of tiles updated
+ */
+export async function applyLandingPageTiles(scene, art = {}) {
+  if (!scene) {
+    return 0;
+  }
+  const logoOnly = art.logoOnly || null;
+  const titleOnly = art.titleOnly || null;
+  if (!logoOnly && !titleOnly) {
+    return 0;
+  }
+
+  const tiles = [...(scene.tiles?.contents ?? scene.tiles ?? [])];
+  const updates = [];
+  for (const tile of tiles) {
+    const kind = classifyLandingTile(tile);
+    const src = kind === "logoOnly" ? logoOnly : kind === "titleOnly" ? titleOnly : null;
+    if (!src) {
+      continue;
+    }
+    const id = tile.id ?? tile._id;
+    if (!id) {
+      continue;
+    }
+    updates.push({ _id: id, "texture.src": src });
+  }
+  if (updates.length) {
+    await scene.updateEmbeddedDocuments("Tile", updates);
+  }
+  return updates.length;
 }
 
 function considerPath(found, packagePath, worldPath) {
