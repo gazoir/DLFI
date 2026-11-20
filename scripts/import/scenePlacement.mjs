@@ -2,8 +2,11 @@
  * Place NPCs / descriptions onto cloned template scenes and remove unused slots.
  *
  * Template conventions (FOUNDRY_SYNC):
- * - Location/Landing NPC slots: 1A1, 2A1, 2A2, ...
- * - Landing PC slots: 3P1 ... 6P6
+ * - Location NPC slots: 1A1, 2A1, 2A2, ...
+ * - Landing PC slots only (`{partySize}P{seat}`): world Landing template keeps
+ *   layout rows 3P1–3P3, 4P1–4P4, 5P1–5P5, 6P1–6P6. DLFI picks one row by
+ *   seated count (see {@link selectLandingPcSlots}); position + texture scale
+ *   stay on the template token. Non-`nPm` tokens are ignored.
  * - Location field drawings (by text/name): Description, POIs / Points of Interest,
  *   Session Notes… — plus legacy Description 1–3 (Description 4 is unused leftover)
  * - Battlemaps: ignore A#/P# placeholders; create enemy + party roster lines in
@@ -147,17 +150,70 @@ export async function finalizeLocationScene(
 
 export async function finalizeLandingScene(scene, pcs = []) {
   if (!scene) return;
-  // Prefer dedicated PC slots (3P1…); fall back to A-slots used by the bundled landing template.
-  const pcSlots = listPcSlots(scene);
-  const slots = pcSlots.length ? pcSlots : listNpcSlots(scene);
+  // Only `{n}P{m}` placeholders — party-size layouts on the world Landing template.
+  const allPcSlots = listPcSlots(scene);
+  const slots = selectLandingPcSlots(allPcSlots, pcs.length);
   const usedPcIds = await placePcsOnScene(scene, pcs, slots);
 
   const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
-  const deleteTokenIds = [
-    ...(pcSlots.length ? listNpcSlots(scene).map((t) => t.id) : []),
-    ...slots.map((t) => t.id).filter((id) => !usedPcIds.has(id))
-  ];
+  // Drop every unused nPm placeholder (other party-size rows + unused seats).
+  const deleteTokenIds = allPcSlots
+    .map((t) => t.id)
+    .filter((id) => id && !usedPcIds.has(id));
   await deleteEmbedded(scene, deleteDrawingIds, deleteTokenIds);
+}
+
+/**
+ * Pick Landing PC placeholders for the seated party size.
+ *
+ * | Seated | Slots |
+ * |------:|:------|
+ * | 1 | `3P2` (centre of the 3-row) |
+ * | 2 | `4P2`, `4P3` (centred pair on the 4-row) |
+ * | 3–6 | `{n}P1`…`{n}P{n}` |
+ * | 7+ | `6P1`…`6P6` (extras overflow to the right of `6P6`) |
+ *
+ * @param {Iterable<object>} allPcSlots tokens whose names match `{n}P{m}`
+ * @param {number} partySize seated PC count
+ * @returns {object[]}
+ */
+export function selectLandingPcSlots(allPcSlots, partySize) {
+  const byGroup = new Map();
+  for (const token of allPcSlots ?? []) {
+    const parsed = parseSlot(token?.name);
+    if (!Number.isFinite(parsed.major) || parsed.major >= 99) continue;
+    if (!byGroup.has(parsed.major)) byGroup.set(parsed.major, []);
+    byGroup.get(parsed.major).push(token);
+  }
+  for (const group of byGroup.values()) {
+    group.sort(
+      (a, b) => parseSlot(a.name).minor - parseSlot(b.name).minor
+    );
+  }
+
+  const n = Math.max(0, Number(partySize) || 0);
+  if (n <= 0) return [];
+
+  const seat = (groupSize, minor) =>
+    (byGroup.get(groupSize) ?? []).find(
+      (token) => parseSlot(token.name).minor === minor
+    ) ?? null;
+
+  if (n === 1) {
+    return [seat(3, 2)].filter(Boolean);
+  }
+  if (n === 2) {
+    return [seat(4, 2), seat(4, 3)].filter(Boolean);
+  }
+  if (n >= 3 && n <= 6) {
+    const group = byGroup.get(n) ?? [];
+    return group.filter((token) => {
+      const minor = parseSlot(token.name).minor;
+      return minor >= 1 && minor <= n;
+    });
+  }
+  // 7+: fill the 6-row; overflow is created beside 6P6.
+  return byGroup.get(6) ?? [];
 }
 
 export async function finalizeUtilityScene(scene) {
@@ -556,17 +612,22 @@ async function placeNpcsOnScene(scene, npcs, slots) {
 async function placePcsOnScene(scene, pcs, slots) {
   const used = new Set();
   const updates = [];
-  for (let i = 0; i < Math.min(pcs.length, slots.length); i += 1) {
+  const create = [];
+  const slotted = Math.min(pcs.length, slots.length);
+
+  for (let i = 0; i < slotted; i += 1) {
     const actor = pcs[i]?.actor;
     const token = slots[i];
     if (!actor || !token) continue;
     used.add(token.id);
     const textureSrc = pickTokenTexture(actor, undefined, FLAG_SCOPE);
+    // Keep template x/y/width/height/texture.scale* — only bind actor + art.
     updates.push({
       _id: token.id,
       name: actor.name,
       actorId: actor.id,
       actorLink: true,
+      disposition: 1,
       ...(textureSrc ? { "texture.src": textureSrc } : {}),
       flags: {
         ...(token.flags ?? {}),
@@ -579,8 +640,55 @@ async function placePcsOnScene(scene, pcs, slots) {
       }
     });
   }
+
+  // Overflow (party > 6): clone pose/scale from the last template seat (6P6).
+  const anchor = slots[slots.length - 1] ?? null;
+  const grid = Number(scene.grid?.size ?? scene.grid) || 100;
+  for (let i = slotted; i < pcs.length; i += 1) {
+    const actor = pcs[i]?.actor;
+    if (!actor) continue;
+    const textureSrc = pickTokenTexture(actor, undefined, FLAG_SCOPE);
+    const overflowIndex = i - slotted;
+    const anchorScaleX = Number(anchor?.texture?.scaleX);
+    const anchorScaleY = Number(anchor?.texture?.scaleY);
+    const width = Math.max(0.5, Number(anchor?.width) || 1);
+    const height = Math.max(0.5, Number(anchor?.height) || 1);
+    const step = width * grid * 1.05;
+    const x =
+      Number(anchor?.x ?? 0) + step * (overflowIndex + 1);
+    const y = Number(anchor?.y ?? Math.floor((scene.height ?? 1080) * 0.75));
+    create.push({
+      name: actor.name,
+      actorId: actor.id,
+      actorLink: true,
+      disposition: 1,
+      width,
+      height,
+      x,
+      y,
+      texture: {
+        ...(textureSrc ? { src: textureSrc } : {}),
+        ...(Number.isFinite(anchorScaleX) && anchorScaleX > 0
+          ? { scaleX: anchorScaleX }
+          : {}),
+        ...(Number.isFinite(anchorScaleY) && anchorScaleY > 0
+          ? { scaleY: anchorScaleY }
+          : {})
+      },
+      flags: {
+        [FLAG_SCOPE]: {
+          kind: "pc-overflow",
+          actorUuid: actor.uuid
+        }
+      }
+    });
+  }
+
   if (updates.length) {
     await scene.updateEmbeddedDocuments("Token", updates);
+  }
+  if (create.length) {
+    await scene.createEmbeddedDocuments("Token", create);
   }
   return used;
 }
