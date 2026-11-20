@@ -15,6 +15,8 @@ export const SETTING_TEMPLATE_LANDING = "templateLanding";
 export const SETTING_TEMPLATE_INBOX = "templateInbox";
 export const SETTING_SPELL_PACKS = "spellItemPacks";
 export const SETTING_LIVE_SESSION = "liveSessionKey";
+/** Delete the previous import of the same sessionCode (world docs + assets) before re-importing. */
+export const SETTING_REPLACE_ON_REIMPORT = "replaceOnReimport";
 
 /** Keep this many zip copies per session under the DLCE inbox. */
 export const INBOX_KEEP_PER_SESSION = 3;

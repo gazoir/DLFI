@@ -112,3 +112,22 @@
 .dlfi-load-version {
   margin-top: 0.35rem;
 }
+
+.dlfi-inline-check {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.dlfi-session-row.is-live {
+  border-color: var(--color-border-highlight, #c9a24a);
+}
+
+.dlfi-live-badge {
+  background: var(--color-border-highlight, #c9a24a);
+  border-radius: 0.2rem;
+  color: #111;
+  font-size: 0.75em;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+}

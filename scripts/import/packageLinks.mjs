@@ -294,6 +294,22 @@ export function collectChallengeEnemies(entry, raw, { npcDocuments = [] } = {}) 
   return [...counts.entries()].map(([npcId, count]) => ({ npcId, count }));
 }
 
+/**
+ * DLCE NPC ids that appear as enemies in any combat battlemap (unlinked prototype tokens).
+ * @param {Array<{ entry: object, raw: object|null }>} battlemaps
+ * @param {Array<{ id: string, raw: object }>} npcDocuments
+ * @returns {Set<string>}
+ */
+export function collectCombatEnemyIds(battlemaps = [], npcDocuments = []) {
+  const ids = new Set();
+  for (const { entry, raw } of battlemaps) {
+    for (const { npcId } of collectChallengeEnemies(entry, raw, { npcDocuments })) {
+      ids.add(npcId);
+    }
+  }
+  return ids;
+}
+
 function normalizeEnemyField(value) {
   if (value == null || value === "") {
     return [];

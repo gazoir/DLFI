@@ -6,6 +6,7 @@ import {
   setSetting,
   SETTING_IMPORTS,
   SETTING_LIVE_SESSION,
+  SETTING_REPLACE_ON_REIMPORT,
   setting,
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
@@ -20,6 +21,7 @@ import {
   buildChallengeHostLocations,
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
+  collectCombatEnemyIds,
   collectNpcLocationIds,
   formatPoisBulletList,
   locationDescriptionText,
@@ -52,6 +54,7 @@ import {
   createSceneFromBundledTemplate
 } from "./defaultTemplates.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
+import { purgeSessionAssets, purgeSessionDocuments } from "./sessions.mjs";
 import {
   ensureDataFolder,
   normalizeDataPath,
@@ -168,7 +171,7 @@ async function duplicateTemplateScene(settingKey, fallbackName, options = {}) {
  * Import a loaded Session Package into the world.
  *
  * @param {import("../package/readPackage.mjs").LoadedPackage} loaded
- * @param {{ packCurrentLive?: boolean }} [options]
+ * @param {{ packCurrentLive?: boolean, replaceExisting?: boolean }} [options]
  */
 export async function importSessionPackage(loaded, options = {}) {
   const { manifest, files } = loaded;
@@ -179,6 +182,26 @@ export async function importSessionPackage(loaded, options = {}) {
     notify("DLFI: Pack-to-Archive before import is stubbed in 0.1 — continuing with import.", {
       type: "warning"
     });
+  }
+
+  const replaceExisting =
+    options.replaceExisting ?? setting(SETTING_REPLACE_ON_REIMPORT) !== false;
+  if (replaceExisting) {
+    try {
+      const removed = await purgeSessionDocuments(manifest.sessionCode);
+      const assets = await purgeSessionAssets(
+        manifest.sessionCode,
+        String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports"
+      );
+      if (removed || assets.dirs.length) {
+        console.log(`${MODULE_ID} | replaced previous import of ${manifest.sessionCode}`, {
+          removed,
+          assets
+        });
+      }
+    } catch (error) {
+      console.warn(`${MODULE_ID} | could not remove previous import of ${manifest.sessionCode}`, error);
+    }
   }
 
   const { name: folderName, folders } = await ensureSessionFolders(manifest, importKey);
@@ -440,12 +463,23 @@ export async function importSessionPackage(loaded, options = {}) {
   /** @type {Array<{ entry: object, raw: object, actor: Actor }>} */
   const npcRecords = [];
 
-  for (const entry of (manifest.documents ?? []).filter((d) => d.type === "npc")) {
-    const raw = readDocument(entry.file) ?? {};
-    const { portrait, token } = resolveNpcMedia(entry, uploaded);
+  const npcEntries = (manifest.documents ?? []).filter((d) => d.type === "npc");
+  const npcRawById = new Map(npcEntries.map((entry) => [entry.id, readDocument(entry.file) ?? {}]));
+  // Enemies in combat encounters are unlinked on Actor.prototypeToken (Link Actor Data off).
+  const combatEnemyIds = collectCombatEnemyIds(
+    battlemapMeta,
+    npcEntries.map((entry) => ({ id: entry.id, raw: npcRawById.get(entry.id) }))
+  );
+
+  for (const entry of npcEntries) {
+    const raw = npcRawById.get(entry.id) ?? {};
+    const { portrait, token, tokenSlots, tokenWildcard } = resolveNpcMedia(entry, uploaded);
     const actorData = buildNpcNpcActorData(raw, entry, {
       portrait,
       token,
+      tokenSlots,
+      tokenWildcard,
+      combatEnemy: combatEnemyIds.has(entry.id),
       tokenScale: entry.tokenScale,
       folderId: folders.Actor?.id ?? null,
       importKey
@@ -531,6 +565,8 @@ export async function importSessionPackage(loaded, options = {}) {
       const petActorData = buildNpcNpcActorData(petRaw, petEntry, {
         portrait: petMedia.portrait,
         token: petMedia.token,
+        tokenSlots: petMedia.tokenSlots,
+        tokenWildcard: petMedia.tokenWildcard,
         tokenScale: pet.tokenScale,
         folderId: folders.Actor?.id ?? null,
         importKey

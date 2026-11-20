@@ -4,6 +4,8 @@
  * while older packages used assets/portraits/ and assets/tokens/.
  */
 
+import { resolveNpcTokenSlots } from "./tokenArt.mjs";
+
 /**
  * @param {Map<string, string>} uploaded packagePath -> world path
  * @param {string[]} candidates package-relative paths to try
@@ -137,5 +139,15 @@ export function resolveNpcMedia(entry, uploaded) {
     ]) ||
     portrait;
 
-  return { portrait, token };
+  const { slots, wildcard } = resolveNpcTokenSlots(entry, uploaded);
+  if (slots.length >= 2) {
+    return {
+      portrait,
+      token: slots[0],
+      tokenSlots: slots,
+      tokenWildcard: wildcard
+    };
+  }
+
+  return { portrait, token, tokenSlots: [], tokenWildcard: null };
 }

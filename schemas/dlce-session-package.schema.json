@@ -167,6 +167,15 @@
           "type": ["number", "null"],
           "description": "Foundry prototype token scale. 1.1 when token is a VTTTT bake (margin around the circle for Pseudo3d)."
         },
+        "tokens": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "NPCs with multiple VTT token art slots: sequentially numbered package paths (e.g. assets/npc/tokens/{id}_1.webp, {id}_2.webp). DLFI sets prototypeToken.randomImg and a texture.src wildcard (`{id}_*.webp`). `token` should still be the first slot."
+        },
+        "tokenWildcard": {
+          "type": ["string", "null"],
+          "description": "Optional package-relative glob containing `*` that matches only this NPC's token slots (e.g. assets/npc/tokens/{id}_*.webp). Takes precedence over auto-detection."
+        },
         "battlemap": {
           "type": ["string", "null"],
           "description": "Battle map path under assets/location/battlemaps/"
@@ -234,7 +243,9 @@
         },
         "portrait": { "type": ["string", "null"] },
         "token": { "type": ["string", "null"] },
-        "tokenScale": { "type": ["number", "null"] }
+        "tokenScale": { "type": ["number", "null"] },
+        "tokens": { "type": ["array", "null"], "items": { "type": "string" } },
+        "tokenWildcard": { "type": ["string", "null"] }
       }
     }
   }

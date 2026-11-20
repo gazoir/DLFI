@@ -54,3 +54,7 @@ Also keep exporting per-document `session_note` on document JSON (already done v
 - Challenge host location resolves from `locationIds`, challenge→location links, or reverse location→challenge links.
 - Landing and Leftovers are created **after** the MSD-ordered location/battlemap loop.
 - MSD journal conversion lives in `scripts/import/msdJournal.mjs` (`convertMsdHtmlForFoundry`).
+
+## NPC token wildcards (DLFI 0.1.18)
+
+For NPCs with several VTT token art slots, export sequentially numbered files (`assets/npc/tokens/{id}_1.webp`, `{id}_2.webp`, …) and set on the NPC manifest document entry: `tokens` (string[]), optional `tokenWildcard` (`assets/npc/tokens/{id}_*.webp`), and keep `token` = first slot. DLFI then sets `prototypeToken.randomImg = true` with a `*` `texture.src`. See README → "NPC token art slots".

@@ -75,7 +75,41 @@
 
   {{#if isSessions}}
   <div class="dlfi-panel">
-    <p class="notes">Activate / bulk-delete for imported session folders lands next. Pack-before-import and exclusive navigation already run on Load.</p>
+    <p class="notes">Imported sessions in this world. Activate switches navigation, the Landing scene and the live session without re-importing. Re-loading a session code replaces its previous import.</p>
+    <div class="dlfi-toolbar">
+      <button type="button" data-action="refreshSessions" {{#if busy}}disabled{{/if}}>Refresh</button>
+      <button type="button" class="dlfi-delete-selected" data-action="deleteSelectedSessions" {{#if busy}}disabled{{/if}}>Delete selected</button>
+      <label class="dlfi-inline-check">
+        <input type="checkbox" class="dlfi-delete-assets" checked>
+        Also remove <code>{{importsPath}}/…</code> asset folders
+      </label>
+    </div>
+    {{#if status}}<p class="dlfi-status">{{status}}</p>{{/if}}
+
+    {{#unless hasImported}}
+      <p class="notes">No imported sessions yet. Use the Import tab to load a Session Package.</p>
+    {{else}}
+    <label class="dlfi-inline-check">
+      <input type="checkbox" data-action="toggleAllSessions" {{#if busy}}disabled{{/if}}>
+      Select all
+    </label>
+    <ol class="dlfi-session-list">
+      {{#each importedSessions}}
+      <li class="dlfi-session-row{{#if isLive}} is-live{{/if}}">
+        <div class="dlfi-session-main">
+          <input type="checkbox" class="dlfi-session-check" value="{{sessionCode}}" aria-label="Select {{displayCode}}" {{#if ../busy}}disabled{{/if}}>
+          <div class="dlfi-session-meta">
+            <strong>{{displayCode}}{{#if isLive}} <span class="dlfi-live-badge">Live</span>{{/if}}</strong>
+            <span>{{sessionName}}</span>
+            <span class="notes">{{counts.scenes}} scenes · {{counts.actors}} actors · {{counts.items}} items · {{counts.journals}} journals · imported {{importedAt}}</span>
+          </div>
+          <button type="button" data-action="activateSession" data-session-code="{{sessionCode}}"
+            {{#if ../busy}}disabled{{/if}}>{{#if isLive}}Re-activate{{else}}Activate{{/if}}</button>
+        </div>
+      </li>
+      {{/each}}
+    </ol>
+    {{/unless}}
   </div>
   {{/if}}
 
