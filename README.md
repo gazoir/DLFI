@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.20`)
+## Status (`0.1.22`)
 
 Working in this slice:
 
@@ -20,7 +20,7 @@ Working in this slice:
 - **Landing Page art:** DLCE exports Clean / Logo_Burn / Logo_Only / Title_Only under `Landing Page/`; DLFI uses **Logo_Burn** as the Landing scene background and keeps the other slides in the import tree for manual placement
 - **DLCE inbox** (`Data/dlce-inbox`): zip-only, auto-created, Browse… picker, nested as `Session Code · Session Name`, keeps 3 newest zips per session
 - **DLFI imports** (`Data/dlfi-imports`): separate tree mirroring the Session Package zip layout under `assets/` (ready for DLCE WD-type folders)
-- Template placement: fill dedicated Location drawings — **Description** (description/appearance), **POIs** (bullet list), **Session Notes** — delete empty/unused boxes (incl. legacy Description 4); bind NPCs to `1A#` slots (actor + token art) including reverse location→NPC links, PCs to `3P#`–`6P#` on Landing, delete unused placeholders
+- Template placement: fill dedicated Location drawings — **Description** (description/appearance), **POIs** (bullet list), **Session Notes** — delete empty/unused boxes (incl. legacy Description 4); bind NPCs to `1A#` slots (actor + token art) including reverse location→NPC links; Landing PCs only on `{partySize}P{seat}` placeholders (keep template x/y/scale; 2→`4P2`+`4P3`, 3–6→that row, 7+→`6P*` + overflow; delete unused `nPm` rows; ignore non-`nPm` tokens)
 - Battlemaps use the colour (non-grid) combat art; place unlinked enemies then linked PCs+pets in two footprint-spaced rows flush to the canvas bottom (below map art), with correct token size
 - PCs: match by DDB id/name or create a character stub with DDB Beyond URL flags + package portrait/token; pets from `pcs[].pets` become NPC actors with combat stats
 - Leftovers holds NPCs/items not placed on any location or battlemap
@@ -31,6 +31,7 @@ Working in this slice:
 - **NPC prototype tokens:** Lock Artwork Rotation on, name display = Hovered by Anyone (`30`); enemies that appear in combat encounters are **unlinked** (`actorLink: false`), other NPCs and PCs stay linked; NPCs with several token art slots get `randomImg: true` and a `*` wildcard `texture.src` (see below)
 - **0.1.20:** format v3 accepted without warning; FilePicker resolved via `foundry.applications.apps.FilePicker.implementation` (V13+/V15-safe); battlemap enemy collect/placement logged (counts + npc ids, warnings when empty); 404 on asset purge treated as already deleted
 - **0.1.21:** battlemap party placement logs skipped PC/pet ids and reasons when `manifest.pcs` is non-empty but tokens are not placed
+- **0.1.22:** Landing PC placement picks the party-size `{n}P*` row from the world Landing template (2→centred `4P2`/`4P3`; 7+ overflows past `6P6`); keeps template position/scale; PCs only
 
 Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 

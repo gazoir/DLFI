@@ -79,6 +79,7 @@ const {
   classifyLocationFieldLabel,
   layoutBattlemapRosterLines,
   sceneCanvasMetrics,
+  selectLandingPcSlots,
   tokenPlacementSpec
 } = await import("./scenePlacement.mjs");
 const {
@@ -478,6 +479,33 @@ for (const path of paths) {
     { id: "c", text: "Description 3" }
   ]);
   assert(legacy.description?.id === "a" && legacy.pois?.id === "b" && legacy.sessionNotes?.id === "c", "legacy 1/2/3 map");
+}
+
+// Landing PC slots: party-size layouts ({n}P{m})
+{
+  const mk = (name) => ({ id: name, name });
+  const all = [
+    ...[1, 2, 3].map((i) => mk(`3P${i}`)),
+    ...[1, 2, 3, 4].map((i) => mk(`4P${i}`)),
+    ...[1, 2, 3, 4, 5].map((i) => mk(`5P${i}`)),
+    ...[1, 2, 3, 4, 5, 6].map((i) => mk(`6P${i}`)),
+    mk("Ibby"),
+    mk("Player Character"),
+    mk("1A1")
+  ];
+  const names = (n) => selectLandingPcSlots(all, n).map((t) => t.name);
+  assert(names(0).join(",") === "", "0 PCs → no slots");
+  assert(names(1).join(",") === "3P2", "1 PC → centred 3P2");
+  assert(names(2).join(",") === "4P2,4P3", "2 PCs → centred 4P2+4P3");
+  assert(names(3).join(",") === "3P1,3P2,3P3", "3 PCs → 3P row");
+  assert(names(4).join(",") === "4P1,4P2,4P3,4P4", "4 PCs → 4P row");
+  assert(names(5).join(",") === "5P1,5P2,5P3,5P4,5P5", "5 PCs → 5P row");
+  assert(names(6).join(",") === "6P1,6P2,6P3,6P4,6P5,6P6", "6 PCs → 6P row");
+  assert(names(8).join(",") === "6P1,6P2,6P3,6P4,6P5,6P6", "7+ PCs → 6P row (overflow elsewhere)");
+  assert(
+    selectLandingPcSlots(all, 5).every((t) => /^5P\d$/i.test(t.name)),
+    "5-seat pick never mixes other party-size rows"
+  );
 }
 
 // Description vs session notes helpers
