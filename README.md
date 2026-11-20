@@ -30,6 +30,7 @@ Working in this slice:
 - **Replace on re-import** (world setting, default on): loading a session code that is already imported first removes its previous import so re-syncs do not pile up
 - **NPC prototype tokens:** Lock Artwork Rotation on, name display = Hovered by Anyone (`30`); enemies that appear in combat encounters are **unlinked** (`actorLink: false`), other NPCs and PCs stay linked; NPCs with several token art slots get `randomImg: true` and a `*` wildcard `texture.src` (see below)
 - **0.1.20:** format v3 accepted without warning; FilePicker resolved via `foundry.applications.apps.FilePicker.implementation` (V13+/V15-safe); battlemap enemy collect/placement logged (counts + npc ids, warnings when empty); 404 on asset purge treated as already deleted
+- **0.1.21:** battlemap party placement logs skipped PC/pet ids and reasons when `manifest.pcs` is non-empty but tokens are not placed
 
 Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 

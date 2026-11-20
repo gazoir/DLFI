@@ -609,20 +609,50 @@ export async function importSessionPackage(loaded, options = {}) {
     raw: row.raw
   }));
   const partyForBattlemaps = [];
+  const manifestPcs = manifest.pcs ?? [];
   for (const { actor, pc } of sessionPcs) {
-    partyForBattlemaps.push({ actor, linked: true, kind: "battle-pc" });
+    if (!actor) {
+      console.warn(
+        `${MODULE_ID} | battlemap party skip pc ${pc?.id || "(no id)"} (${pc?.name || "?"}): no Foundry actor resolved`
+      );
+      continue;
+    }
+    partyForBattlemaps.push({
+      actor,
+      linked: true,
+      kind: "battle-pc",
+      dlceId: pc?.id ? String(pc.id) : null,
+      label: pc?.name || actor.name
+    });
     for (const petRow of sessionPets) {
-      if (String(petRow.ownerPcId) === String(pc.id || "")) {
-        partyForBattlemaps.push({
-          actor: petRow.actor,
-          linked: true,
-          kind: "battle-pet"
-        });
+      if (String(petRow.ownerPcId) !== String(pc.id || "")) {
+        continue;
       }
+      if (!petRow.actor) {
+        console.warn(
+          `${MODULE_ID} | battlemap party skip pet of pc ${pc?.id || "(no id)"} (${petRow.pet?.name || "?"}): no Foundry actor`
+        );
+        continue;
+      }
+      partyForBattlemaps.push({
+        actor: petRow.actor,
+        linked: true,
+        kind: "battle-pet",
+        dlceId: petRow.pet?.id ? String(petRow.pet.id) : null,
+        ownerPcId: String(petRow.ownerPcId || pc.id || ""),
+        label: petRow.pet?.name || petRow.actor.name
+      });
     }
   }
   if (battlemapMeta.length && !partyForBattlemaps.length) {
-    console.warn(`${MODULE_ID} | manifest.pcs is empty — battlemaps will have no party tokens`);
+    if (!manifestPcs.length) {
+      console.warn(`${MODULE_ID} | manifest.pcs is empty — battlemaps will have no party tokens`);
+    } else {
+      const skipped = manifestPcs.map((pc) => `${pc?.id || "(no id)"}:${pc?.name || "?"}`).join(", ");
+      console.warn(
+        `${MODULE_ID} | manifest.pcs has ${manifestPcs.length} entr${manifestPcs.length === 1 ? "y" : "ies"} but none became battlemap party tokens — skipped: ${skipped}`
+      );
+    }
   }
   for (const meta of battlemapMeta) {
     const collected = collectChallengeEnemies(meta.entry, meta.raw, {

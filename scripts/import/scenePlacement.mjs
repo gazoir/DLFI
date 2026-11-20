@@ -180,7 +180,7 @@ export async function finalizeUtilityScene(scene) {
  * @param {Scene} scene
  * @param {{
  *   enemies?: Array<{ actor: Actor, count?: number, disposition?: number }>,
- *   party?: Array<{ actor: Actor, linked?: boolean, kind?: string }>
+ *   party?: Array<{ actor: Actor, linked?: boolean, kind?: string, dlceId?: string|null, label?: string|null }>
  * }} [options]
  */
 export async function finalizeBattlemapScene(scene, options = {}) {
@@ -203,14 +203,24 @@ export async function finalizeBattlemapScene(scene, options = {}) {
     }
   }
 
-  const partyRows = (party ?? [])
-    .filter((row) => row?.actor)
-    .map((row) => ({
+  const partyRows = [];
+  for (const row of party ?? []) {
+    const pcLabel = row?.dlceId || row?.label || row?.actor?.name || "(unknown)";
+    if (!row?.actor) {
+      console.warn(
+        `${MODULE_ID} | ${scene.name}: skipped party token ${pcLabel} — no actor on party row`
+      );
+      continue;
+    }
+    partyRows.push({
       actor: row.actor,
       linked: row.linked !== false,
       kind: row.kind || "battle-party",
-      suffix: ""
-    }));
+      suffix: "",
+      dlceId: row.dlceId ?? null,
+      label: row.label ?? null
+    });
+  }
 
   // Drop all template placeholders and managed field drawings on battlemaps.
   const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
@@ -234,15 +244,23 @@ export async function finalizeBattlemapScene(scene, options = {}) {
 
   const create = [...layout.enemyTokens, ...layout.partyTokens];
   const enemyIds = [...new Set(expandedEnemies.map((row) => row.actor?.id).filter(Boolean))];
+  const partyIds = partyRows.map((row) => row.dlceId || row.actor?.id).filter(Boolean);
   if (!layout.enemyTokens.length) {
     console.warn(`${MODULE_ID} | ${scene.name}: no enemy tokens to place (${enemies.length} enemy row(s) supplied)`);
+  }
+  if ((party ?? []).length && !layout.partyTokens.length) {
+    console.warn(
+      `${MODULE_ID} | ${scene.name}: party placement produced 0 tokens despite ${party.length} party row(s)` +
+        (partyIds.length ? ` (ids: ${partyIds.join(", ")})` : "")
+    );
   }
   if (create.length) {
     const created = await scene.createEmbeddedDocuments("Token", create);
     const createdCount = created?.length ?? create.length;
     console.log(
       `${MODULE_ID} | ${scene.name}: placed ${createdCount}/${create.length} tokens ` +
-        `(${layout.enemyTokens.length} enemy, ${layout.partyTokens.length} party); enemy npc actor ids: ${enemyIds.join(", ") || "none"}`
+        `(${layout.enemyTokens.length} enemy, ${layout.partyTokens.length} party); ` +
+        `enemy npc actor ids: ${enemyIds.join(", ") || "none"}; party ids: ${partyIds.join(", ") || "none"}`
     );
   } else {
     console.warn(`${MODULE_ID} | ${scene.name}: no tokens created (0 enemies, 0 party)`);
