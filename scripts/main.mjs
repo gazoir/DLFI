@@ -11,6 +11,7 @@ import {
   SETTING_IMPORTS,
   SETTING_INBOX,
   SETTING_LIVE_SESSION,
+  SETTING_REPLACE_ON_REIMPORT,
   SETTING_SPELL_PACKS,
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
@@ -92,6 +93,15 @@ Hooks.once("init", () => {
     config: false,
     type: String,
     default: ""
+  });
+
+  game.settings.register(MODULE_ID, SETTING_REPLACE_ON_REIMPORT, {
+    name: "Replace previous import of the same session",
+    hint: "When loading a session code that is already imported, delete its old folders, scenes, actors, items, journals and asset trees first so re-syncs do not pile up. PC actors are kept.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
   });
 
   game.settings.registerMenu(MODULE_ID, "openDamnedLucky", {

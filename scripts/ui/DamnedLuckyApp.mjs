@@ -9,6 +9,12 @@ import {
   SETTING_INBOX
 } from "../constants.mjs";
 import { importSessionPackage } from "../import/importSession.mjs";
+import {
+  activateImportedSession,
+  deleteImportedSessions,
+  describeDeleteResults,
+  listImportedSessions
+} from "../import/sessions.mjs";
 import { ensureDataFolder, pickDataFolder } from "../package/dataFolders.mjs";
 import { ensureInboxRoot, mirrorChosenZipToInbox } from "../package/inbox.mjs";
 import {
@@ -39,6 +45,10 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       chooseZip: DamnedLuckyApp.#onChooseZip,
       pickInbox: DamnedLuckyApp.#onPickInbox,
       pickImports: DamnedLuckyApp.#onPickImports,
+      refreshSessions: DamnedLuckyApp.#onRefreshSessions,
+      activateSession: DamnedLuckyApp.#onActivateSession,
+      deleteSelectedSessions: DamnedLuckyApp.#onDeleteSelectedSessions,
+      toggleAllSessions: DamnedLuckyApp.#onToggleAllSessions,
       packLive: DamnedLuckyApp.#onPackLive
     }
   };
@@ -53,6 +63,8 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
   #tab = "import";
   /** @type {ReturnType<typeof groupPackagesBySession>} */
   #sessions = [];
+  /** @type {ReturnType<typeof listImportedSessions>} */
+  #imported = [];
   #busy = false;
   #status = "";
 
@@ -60,6 +72,8 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     return {
       tab: this.#tab,
       sessions: this.#sessions,
+      importedSessions: this.#imported,
+      hasImported: this.#imported.length > 0,
       busy: this.#busy,
       status: this.#status,
       inboxPath: setting(SETTING_INBOX) || DEFAULT_INBOX_PATH,
@@ -68,6 +82,16 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       isImport: this.#tab === "import",
       isPack: this.#tab === "pack"
     };
+  }
+
+  refreshImported() {
+    try {
+      this.#imported = listImportedSessions();
+    } catch (error) {
+      console.error(error);
+      this.#imported = [];
+    }
+    this.render();
   }
 
   async refreshInbox() {
@@ -113,7 +137,89 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       return;
     }
     this.#tab = tab;
+    if (tab === "sessions") {
+      this.refreshImported();
+      return;
+    }
     this.render();
+  }
+
+  static async #onRefreshSessions() {
+    this.refreshImported();
+  }
+
+  static async #onActivateSession(event, target) {
+    const code = target.dataset.sessionCode;
+    const row = this.#imported.find((entry) => entry.sessionCode === code);
+    if (!row) {
+      notify("Could not find that imported session.", { type: "error" });
+      return;
+    }
+    this.#busy = true;
+    this.#status = `Activating ${row.displayCode}…`;
+    this.render();
+    try {
+      await activateImportedSession(code);
+      this.#status = `Activated ${row.displayCode}: navigation, Landing scene, and live session updated.`;
+      notify(this.#status);
+    } catch (error) {
+      console.error(error);
+      this.#status = error instanceof Error ? error.message : String(error);
+      notify(this.#status, { type: "error" });
+    } finally {
+      this.#busy = false;
+      this.refreshImported();
+    }
+  }
+
+  #selectedSessionCodes() {
+    return [...(this.element?.querySelectorAll?.("input.dlfi-session-check:checked") ?? [])]
+      .map((input) => input.value)
+      .filter(Boolean);
+  }
+
+  static async #onToggleAllSessions(event, target) {
+    const checked = Boolean(target.checked);
+    for (const input of this.element?.querySelectorAll?.("input.dlfi-session-check") ?? []) {
+      input.checked = checked;
+    }
+  }
+
+  static async #onDeleteSelectedSessions() {
+    const codes = this.#selectedSessionCodes();
+    if (!codes.length) {
+      notify("Select one or more imported sessions first.", { type: "warning" });
+      return;
+    }
+    const deleteAssets = Boolean(this.element?.querySelector?.("input.dlfi-delete-assets")?.checked);
+    const labels = codes
+      .map((code) => this.#imported.find((entry) => entry.sessionCode === code)?.displayCode ?? code)
+      .join(", ");
+    const confirmed = await confirmDialog(
+      "Delete imported sessions",
+      `<p>Delete <strong>${foundry.utils.escapeHTML?.(labels) ?? labels}</strong>?</p>` +
+        `<p>This removes the session's world folders, scenes, actors, items and journals` +
+        `${deleteAssets ? ", plus its Data/dlfi-imports asset folders when Foundry allows it" : ""}. ` +
+        `PC actors are kept.</p>`
+    );
+    if (!confirmed) {
+      return;
+    }
+    this.#busy = true;
+    this.#status = `Deleting ${codes.length} session(s)…`;
+    this.render();
+    try {
+      const results = await deleteImportedSessions(codes, { deleteAssets });
+      this.#status = describeDeleteResults(results);
+      notify(this.#status);
+    } catch (error) {
+      console.error(error);
+      this.#status = error instanceof Error ? error.message : String(error);
+      notify(this.#status, { type: "error" });
+    } finally {
+      this.#busy = false;
+      this.refreshImported();
+    }
   }
 
   static async #onRefreshInbox() {
@@ -166,6 +272,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     this.render();
     try {
       await importSessionPackage(version.package);
+      this.#imported = listImportedSessions();
       this.#status = `Imported ${session.displayCode}.`;
       notify(this.#status);
     } catch (error) {
@@ -195,6 +302,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
         const pkg = loadPackageFromZipBytes(buffer, file.name);
         await mirrorChosenZipToInbox(file, buffer);
         await importSessionPackage(pkg);
+        this.#imported = listImportedSessions();
         this.#status = `Imported ${pkg.manifest.displayCode} from ${file.name}.`;
         notify(this.#status);
         await this.refreshInbox();
@@ -219,6 +327,19 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       void this.refreshInbox();
     }
   }
+}
+
+async function confirmDialog(title, content) {
+  const DialogV2 = foundry.applications?.api?.DialogV2;
+  if (DialogV2?.confirm) {
+    return DialogV2.confirm({
+      window: { title },
+      content,
+      rejectClose: false,
+      modal: true
+    });
+  }
+  return Dialog.confirm({ title, content });
 }
 
 export function openDamnedLuckyApp() {

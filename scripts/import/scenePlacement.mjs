@@ -11,6 +11,7 @@
  */
 
 import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { pickTokenTexture, tokenDisplayHover } from "./tokenArt.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
@@ -195,6 +196,7 @@ export async function finalizeBattlemapScene(scene, options = {}) {
         actor: row.actor,
         linked: false,
         kind: "battle-enemy",
+        variantIndex: count > 1 ? i : undefined,
         suffix: count > 1 ? ` ${i + 1}` : ""
       });
     }
@@ -269,7 +271,7 @@ export function tokenPlacementSpec(row) {
   const proto = actor?.prototypeToken ?? {};
   const width = Math.max(0.5, Number(proto.width) || 1);
   const height = Math.max(0.5, Number(proto.height) || 1);
-  const textureSrc = proto?.texture?.src || actor?.img || null;
+  const textureSrc = pickTokenTexture(actor, row.variantIndex, FLAG_SCOPE);
   const scaleX = Number(proto?.texture?.scaleX);
   const scaleY = Number(proto?.texture?.scaleY);
   return {
@@ -340,6 +342,9 @@ export function layoutBattlemapRosterLines({
         name: spec.name,
         actorId: spec.actorId,
         actorLink: spec.linked,
+        ...(spec.kind === "battle-enemy"
+          ? { lockRotation: true, displayName: tokenDisplayHover() }
+          : {}),
         width: spec.width,
         height: spec.height,
         x: Math.round(x),
@@ -465,7 +470,7 @@ async function placeNpcsOnScene(scene, npcs, slots) {
   for (let i = 0; i < npcs.length; i += 1) {
     const actor = npcs[i]?.actor;
     if (!actor) continue;
-    const textureSrc = actor.prototypeToken?.texture?.src || actor.img || null;
+    const textureSrc = pickTokenTexture(actor, undefined, FLAG_SCOPE);
 
     if (i < slots.length) {
       const token = slots[i];
@@ -521,7 +526,7 @@ async function placePcsOnScene(scene, pcs, slots) {
     const token = slots[i];
     if (!actor || !token) continue;
     used.add(token.id);
-    const textureSrc = actor.prototypeToken?.texture?.src || actor.img || null;
+    const textureSrc = pickTokenTexture(actor, undefined, FLAG_SCOPE);
     updates.push({
       _id: token.id,
       name: actor.name,

@@ -18,6 +18,7 @@ import {
 } from "./damageFormula.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import { MODULE_ID } from "../constants.mjs";
+import { tokenDisplayHover, wildcardPrototypeTokenPatch } from "./tokenArt.mjs";
 
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"];
 
@@ -91,7 +92,17 @@ const SKILL_ABILITY = {
 /**
  * @param {object} raw DLCE document JSON
  * @param {object} entry Manifest document entry
- * @param {{ portrait?: string|null, token?: string|null, folderId?: string|null, importKey?: string }} media
+ * @param {{
+ *   portrait?: string|null,
+ *   token?: string|null,
+ *   tokenScale?: number|null,
+ *   tokenSlots?: string[],
+ *   tokenWildcard?: string|null,
+ *   combatEnemy?: boolean,
+ *   folderId?: string|null,
+ *   importKey?: string
+ * }} media
+ * `combatEnemy` turns Link Actor Data off (prototype token is unlinked).
  */
 export function buildNpcNpcActorData(raw, entry, media = {}) {
   const fields = asObject(raw?.fields) ?? asObject(raw) ?? {};
@@ -116,11 +127,14 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
   const scale = Number(media.tokenScale);
   const textureScale = Number.isFinite(scale) && scale > 0 ? scale : undefined;
 
+  const wildcardPatch = wildcardPrototypeTokenPatch(media.tokenSlots, media.tokenWildcard);
   const prototypeToken = foundry.utils.mergeObject(
     embedded?.prototypeToken ? foundry.utils.duplicate(embedded.prototypeToken) : {},
     {
       name,
-      actorLink: true,
+      actorLink: !media.combatEnemy,
+      lockRotation: true,
+      displayName: tokenDisplayHover(),
       width: tokenSize,
       height: tokenSize,
       ...(tokenSrc
@@ -134,6 +148,13 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
     },
     { inplace: false }
   );
+  if (wildcardPatch) {
+    prototypeToken.randomImg = true;
+    prototypeToken.texture = {
+      ...(prototypeToken.texture ?? {}),
+      src: wildcardPatch.texture.src
+    };
+  }
 
   return {
     name,
@@ -151,6 +172,10 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
         subtype: entry?.subtype ?? fields.subtype ?? "person",
         locationIds: entry?.locationIds ?? [],
         importKey: media.importKey,
+        combatEnemy: Boolean(media.combatEnemy),
+        ...(wildcardPatch
+          ? { tokenSlots: [...media.tokenSlots], tokenWildcard: media.tokenWildcard }
+          : {}),
         source: embedded ? "embedded-foundry" : "dlce-fields",
         officialKey: fields.combat_official_key ?? null
       }

@@ -866,6 +866,274 @@ for (const path of paths) {
   assert(m.canvasBottom === 2000 && m.gridSize === 100, "sceneCanvasMetrics fallback");
 }
 
+// Prototype tokens: lock rotation, hover names, combat unlink, wildcard art
+{
+  const { collectCombatEnemyIds } = await import("./packageLinks.mjs");
+  const {
+    buildTokenWildcard,
+    discoverTokenSlotPaths,
+    isWildcardPath,
+    pickTokenTexture,
+    resolveNpcTokenSlots,
+    wildcardToRegExp
+  } = await import("./tokenArt.mjs");
+
+  const baseRaw = { fields: { name: "Goblin", creature_size: "Small" } };
+  const baseEntry = { id: "npc_goblin", name: "Goblin", type: "npc" };
+
+  const friendly = buildNpcNpcActorData(baseRaw, baseEntry, { token: "w/goblin.webp" });
+  assert(friendly.prototypeToken.actorLink === true, "non-combat NPC stays linked");
+  assert(friendly.prototypeToken.lockRotation === true, "NPC lockRotation on");
+  assert(friendly.prototypeToken.displayName === 30, "NPC displayName is Hovered by Anyone (30)");
+
+  const enemy = buildNpcNpcActorData(baseRaw, baseEntry, { token: "w/goblin.webp", combatEnemy: true });
+  assert(enemy.prototypeToken.actorLink === false, "combat enemy prototype unlinked");
+  assert(enemy.prototypeToken.lockRotation === true, "combat enemy lockRotation on");
+  assert(enemy.prototypeToken.displayName === 30, "combat enemy displayName hover");
+  assert(!enemy.prototypeToken.randomImg, "single token does not randomise");
+
+  const uploaded = new Map(
+    [
+      "assets/npc/npc_goblin.webp",
+      "assets/npc/tokens/npc_goblin_2.webp",
+      "assets/npc/tokens/npc_goblin_10.webp",
+      "assets/npc/tokens/npc_goblin_1.webp",
+      "assets/npc/tokens/npc_orc_1.webp",
+      "assets/npc/tokens/npc_orc_2.webp"
+    ].map((path) => [path, `dlfi-imports/S1__x__stamp/${path}`])
+  );
+  assert(
+    discoverTokenSlotPaths("npc_goblin", uploaded).join(",") ===
+      [1, 2, 10].map((n) => `assets/npc/tokens/npc_goblin_${n}.webp`).join(","),
+    "discover sequential token slots (numeric order)"
+  );
+  assert(
+    buildTokenWildcard(["a/n_1.webp", "a/n_2.webp"]) === "a/n_*.webp",
+    "wildcard from sequential slots"
+  );
+  assert(wildcardToRegExp("a/n_*.webp").test("a/n_3.webp"), "wildcard regexp matches");
+
+  const media = resolveNpcMedia(baseEntry, uploaded);
+  assert(media.tokenSlots.length === 3, "resolveNpcMedia finds 3 token slots");
+  assert(
+    media.tokenWildcard === "dlfi-imports/S1__x__stamp/assets/npc/tokens/npc_goblin_*.webp",
+    "world wildcard path rooted in imports tree"
+  );
+  assert(media.token === media.tokenSlots[0], "token falls back to first slot");
+  assert(
+    resolveNpcMedia({ id: "npc_solo" }, new Map([["assets/npc/tokens/npc_solo_1.webp", "w/s1.webp"]]))
+      .tokenSlots.length === 0,
+    "single numbered token is not a wildcard"
+  );
+
+  const declared = resolveNpcTokenSlots(
+    {
+      id: "npc_x",
+      tokens: ["assets/npc/tokens/z_b.webp", "assets/npc/tokens/z_a.webp"]
+    },
+    new Map([
+      ["assets/npc/tokens/z_a.webp", "w/z_a.webp"],
+      ["assets/npc/tokens/z_b.webp", "w/z_b.webp"]
+    ])
+  );
+  assert(declared.slots.length === 2 && declared.wildcard === "w/z_*.webp", "declared tokens[] wildcard");
+
+  const explicit = resolveNpcTokenSlots(
+    { id: "npc_goblin", tokenWildcard: "assets/npc/tokens/npc_goblin_*.webp" },
+    uploaded
+  );
+  assert(explicit.slots.length === 3, "explicit tokenWildcard expands uploaded matches");
+
+  const multi = buildNpcNpcActorData(baseRaw, baseEntry, {
+    token: media.token,
+    tokenSlots: media.tokenSlots,
+    tokenWildcard: media.tokenWildcard,
+    combatEnemy: true,
+    tokenScale: 1.1
+  });
+  assert(multi.prototypeToken.randomImg === true, "multi-slot NPC randomImg");
+  assert(isWildcardPath(multi.prototypeToken.texture.src), "multi-slot texture.src contains *");
+  assert(multi.prototypeToken.texture.scaleX === 1.1, "token scale preserved with wildcard");
+  assert(multi.flags.dlfi.tokenSlots.length === 3, "token slots kept in flags for placement");
+
+  const fakeMulti = { img: "p.webp", prototypeToken: multi.prototypeToken, flags: multi.flags };
+  assert(!isWildcardPath(pickTokenTexture(fakeMulti, 4)), "placement picks concrete slot");
+  assert(pickTokenTexture(fakeMulti, 1) === media.tokenSlots[1], "placement cycles slots");
+  assert(
+    pickTokenTexture({ img: "p.webp", prototypeToken: { texture: { src: "a_*.webp" } } }) === "p.webp",
+    "wildcard without slots falls back to portrait"
+  );
+  assert(
+    tokenPlacementSpec({ actor: { id: "a", uuid: "Actor.a", name: "G", ...fakeMulti } }).textureSrc.includes("*") === false,
+    "tokenPlacementSpec avoids wildcard src"
+  );
+
+  const ids = collectCombatEnemyIds(
+    [{ entry: { id: "chal_1" }, raw: { links: [{ target_type: "npc", target_id: "npc_a", count: 2 }] } }],
+    [
+      { id: "npc_a", raw: {} },
+      { id: "npc_b", raw: { links: [{ target_type: "challenge", target_id: "chal_1" }] } },
+      { id: "npc_c", raw: {} }
+    ]
+  );
+  assert(ids.has("npc_a") && ids.has("npc_b") && !ids.has("npc_c"), "combat enemy ids from battlemaps");
+}
+
+// Imported session management (mocked Foundry world)
+{
+  const sessions = await import("./sessions.mjs");
+  const calls = { deleted: [], activated: [], settings: {}, nav: [] };
+
+  const mkCollection = (docs) => {
+    const list = [...docs];
+    list.get = (id) => list.find((doc) => doc.id === id);
+    return list;
+  };
+  const folderFlags = (code, exportedAt, importedAt) => ({
+    dlfi: {
+      sessionCode: code,
+      displayCode: code.replace("SESSION_", "S"),
+      sessionName: `Name ${code}`,
+      exportedAt,
+      importKey: `${code}_${exportedAt.replace(/[:.]/g, "-")}`,
+      importedAt
+    }
+  });
+  const mkFolders = (code, exportedAt, importedAt) =>
+    ["Actor", "Item", "Scene", "JournalEntry"].map((type) => ({
+      id: `f_${code}_${type}`,
+      type,
+      name: code,
+      flags: folderFlags(code, exportedAt, importedAt),
+      folder: null,
+      async delete() {
+        calls.deleted.push(`folder:${this.id}`);
+        const index = game.folders.findIndex((f) => f.id === this.id);
+        if (index >= 0) game.folders.splice(index, 1);
+      }
+    }));
+  const scene = (id, code, kind, nav = false) => ({
+    id,
+    folder: { id: `f_${code}_Scene` },
+    navigation: nav,
+    flags: { dlfi: { kind } },
+    async activate() {
+      calls.activated.push(id);
+    }
+  });
+  const actor = (id, code, type = "npc") => ({
+    id,
+    type,
+    folder: { id: `f_${code}_Actor` },
+    flags: { dlfi: { importKey: `${code}_2026-01-01T00-00-00-000Z` } }
+  });
+
+  const folders = [
+    ...mkFolders("SESSION_014", "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"),
+    ...mkFolders("SESSION_01", "2025-12-01T00:00:00.000Z", "2025-12-02T00:00:00.000Z"),
+    { id: "other", type: "Actor", name: "Mine", flags: {}, folder: null }
+  ];
+  globalThis.game = {
+    folders: mkCollection(folders),
+    scenes: mkCollection([
+      scene("sc_land", "SESSION_014", "landing"),
+      scene("sc_loc", "SESSION_014", "location"),
+      scene("sc_old", "SESSION_01", "landing", true),
+      { id: "sc_user", folder: null, navigation: true, flags: {}, async activate() {} }
+    ]),
+    actors: mkCollection([
+      actor("a_npc", "SESSION_014"),
+      actor("a_pc", "SESSION_014", "character"),
+      { id: "a_moved", type: "npc", folder: null, flags: { dlfi: { importKey: "SESSION_014_2026-01-01T00-00-00-000Z" } } },
+      actor("a_other", "SESSION_01"),
+      { id: "a_user", type: "npc", folder: null, flags: {} }
+    ]),
+    items: mkCollection([]),
+    journal: mkCollection([
+      { id: "j1", folder: { id: "f_SESSION_014_JournalEntry" }, flags: {} }
+    ]),
+    settings: {
+      get: (_module, key) => calls.settings[key] ?? (key === "liveSessionKey" ? "SESSION_014::2026-01-01T00:00:00.000Z" : ""),
+      set: async (_module, key, value) => {
+        calls.settings[key] = value;
+      }
+    }
+  };
+  const mkDocClass = (name) => ({
+    async deleteDocuments(ids) {
+      calls.deleted.push(`${name}:${ids.join(",")}`);
+    }
+  });
+  globalThis.Scene = {
+    ...mkDocClass("Scene"),
+    async updateDocuments(updates) {
+      calls.nav = updates;
+    }
+  };
+  globalThis.Actor = mkDocClass("Actor");
+  globalThis.Item = mkDocClass("Item");
+  globalThis.JournalEntry = mkDocClass("Journal");
+
+  assert(sessions.importKeyBelongsToSession("SESSION_014_2026-01-01T00-00-00-000Z", "SESSION_014"), "importKey matches session");
+  assert(!sessions.importKeyBelongsToSession("SESSION_014_2026-01-01T00-00-00-000Z", "SESSION_01"), "importKey prefix is not ambiguous");
+  assert(sessions.isSessionAssetDir("dlfi-imports/SESSION_014__Name__stamp", "SESSION_014"), "asset dir matches {code}__*");
+  assert(!sessions.isSessionAssetDir("dlfi-imports/SESSION_0141__x", "SESSION_014"), "asset dir prefix is exact");
+
+  const listed = sessions.listImportedSessions();
+  assert(listed.length === 2, "lists two imported sessions");
+  assert(listed[0].sessionCode === "SESSION_014", "newest import first");
+  assert(listed[0].isLive === true && listed[1].isLive === false, "live flag from setting");
+  assert(
+    listed[0].counts.scenes === 2 && listed[0].counts.actors === 2 && listed[0].counts.pcs === 1,
+    "counts include folder docs + flagged docs, PCs separate"
+  );
+
+  const activated = await sessions.activateImportedSession("SESSION_01");
+  assert(calls.activated.join(",") === "sc_old", "activate flips Landing scene");
+  assert(
+    calls.nav.some((u) => u._id === "sc_user" && u.navigation === false) && calls.settings.liveSessionKey === "SESSION_01::2025-12-01T00:00:00.000Z",
+    "activate sets exclusive nav + live key"
+  );
+  assert(activated.landingId === "sc_old", "activate returns landing id");
+
+  FilePickerCalls: {
+    const tree = {
+      "dlfi-imports": { dirs: ["dlfi-imports/SESSION_014__Name__a", "dlfi-imports/SESSION_01__Other__b", "dlfi-imports/keep"], files: [] },
+      "dlfi-imports/SESSION_014__Name__a": { dirs: ["dlfi-imports/SESSION_014__Name__a/assets"], files: [] },
+      "dlfi-imports/SESSION_014__Name__a/assets": { dirs: [], files: ["dlfi-imports/SESSION_014__Name__a/assets/x.webp"] }
+    };
+    const removed = new Set();
+    globalThis.FilePicker = {
+      async browse(_source, path) {
+        if (!tree[path] || removed.has(path)) throw new Error("missing");
+        return tree[path];
+      },
+      async deletePath(_source, path) {
+        removed.add(path);
+        return true;
+      }
+    };
+    const results = await sessions.deleteImportedSessions(["SESSION_014"], { deleteAssets: true, importsPath: "dlfi-imports" });
+    const docs = results[0].docs;
+    assert(docs.scenes === 2 && docs.actors === 2 && docs.journals === 1 && docs.keptPcs === 1, "bulk delete removes session docs, keeps PCs");
+    assert(calls.deleted.includes("Actor:a_npc,a_moved"), "bulk delete includes flagged moved actor");
+    assert(!calls.deleted.some((d) => d.includes("a_pc") || d.includes("a_user") || d.includes("sc_user")), "bulk delete spares PCs and user docs");
+    assert(game.folders.every((f) => f.flags?.dlfi?.sessionCode !== "SESSION_014"), "session folders deleted");
+    assert(
+      calls.settings.liveSessionKey === "SESSION_01::2025-12-01T00:00:00.000Z",
+      "live key untouched when deleting a non-live session"
+    );
+    assert(
+      results[0].assets.dirs.length === 1 && removed.has("dlfi-imports/SESSION_014__Name__a/assets/x.webp"),
+      "asset tree for {code}__* removed (other sessions untouched)"
+    );
+    assert(!removed.has("dlfi-imports/SESSION_01__Other__b"), "other session assets untouched");
+    assert(/Deleted 1 session/.test(sessions.describeDeleteResults(results)), "delete summary text");
+    await sessions.deleteImportedSessions(["SESSION_01"], { deleteAssets: false });
+    assert(calls.settings.liveSessionKey === "", "live key cleared when live session deleted");
+  }
+}
+
 if (failures) {
   console.error(`\n${failures} assertion(s) failed`);
   process.exit(1);
