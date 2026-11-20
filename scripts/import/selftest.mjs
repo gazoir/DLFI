@@ -60,9 +60,16 @@ const {
   shouldUploadPackagePath
 } = await import("./resolveLandingArt.mjs");
 
-const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = await import(
-  "./damageFormula.mjs"
-);
+const {
+  parseWeaponBaseDamage,
+  abilityModifier,
+  attackBonusBandForCr,
+  buildAttackConfig,
+  predictFoundryAttackBonus,
+  predictFoundryBaseDamage,
+  proficiencyBonusFromCr,
+  resolveAttackAbility
+} = await import("./damageFormula.mjs");
 const {
   buildChallengeHostLocations,
   buildNpcLocationsFromLocationLinks,
@@ -129,6 +136,90 @@ function assert(condition, message) {
   const pred = predictFoundryBaseDamage(bite, { abilityMod: strMod, dlceFormula: "2d8 + 4" });
   assert(pred.matchesDlce, `Foundry prediction matches DLCE (${pred.formula})`);
   assert(pred.formula.includes("@mod"), "prediction includes @mod");
+}
+
+// Unit: Imp Sting — melee to-hit uses DEX when stated matches DEX+prof (not STR)
+{
+  assert(proficiencyBonusFromCr(1) === 2, "CR1 proficiency +2");
+  const strMod = abilityModifier(6); // -2
+  const dexMod = abilityModifier(17); // +3
+  const resolved = resolveAttackAbility({
+    attackType: "melee",
+    strMod,
+    dexMod,
+    statedBonus: "+5",
+    proficiencyBonus: 2,
+    damageBonus: 3
+  });
+  assert(resolved.ability === "dex" && resolved.mod === 3, "Imp Sting resolves to DEX");
+
+  // Regression: old STR-only path stored bonus "5" with flat:false → Foundry +10
+  const wrong = buildAttackConfig({
+    attackBonus: "+5",
+    abilityMod: strMod,
+    proficiencyBonus: 2,
+    attackType: "melee",
+    ability: "str"
+  });
+  assert(wrong.bonus === "5" && wrong.flat === false, "STR-only path still produces residual +5");
+  assert(
+    predictFoundryAttackBonus(wrong, { abilityMod: dexMod, proficiencyBonus: 2 }) === 10,
+    "wrong path predicts +10 when Foundry uses DEX"
+  );
+
+  const right = buildAttackConfig({
+    attackBonus: "+5",
+    abilityMod: resolved.mod,
+    proficiencyBonus: 2,
+    attackType: "melee",
+    ability: resolved.ability
+  });
+  assert(right.flat === false && right.bonus === "" && right.ability === "dex", "DEX path stores empty bonus");
+  assert(
+    predictFoundryAttackBonus(right, { abilityMod: resolved.mod, proficiencyBonus: 2 }) === 5,
+    "DEX path predicts +5"
+  );
+
+  const band = attackBonusBandForCr(1, { maxAbilityMod: 3 });
+  assert(band.max === 8, "CR1 band max is PB+ability+3");
+  assert(10 > band.max, "+10 exceeds CR1 band");
+
+  // End-to-end Imp-like NPC build
+  const imp = buildNpcNpcActorData(
+    {
+      fields: {
+        name: "Imp",
+        check_str: 6,
+        check_dex: 17,
+        check_con: 13,
+        check_int: 11,
+        check_wis: 12,
+        check_cha: 14,
+        check_prof: 2,
+        combat_cr: 1,
+        combat_attacks: JSON.stringify([
+          {
+            name: "Sting",
+            bonus: "+5",
+            damage: [
+              { dice: "1d6 + 3", type: "piercing" },
+              { dice: "2d6", type: "poison" }
+            ]
+          }
+        ])
+      }
+    },
+    { id: "npc_imp", name: "Imp", type: "npc" },
+    {}
+  );
+  const sting = imp.items.find((i) => i.name === "Sting");
+  assert(sting, "Imp has Sting weapon");
+  const activity = Object.values(sting.system.activities ?? {})[0];
+  assert(activity?.attack?.ability === "dex", "Sting activity ability is dex");
+  assert(activity?.attack?.flat === false, "Sting uses mod+prof");
+  assert(!activity?.attack?.bonus || activity.attack.bonus === "", "Sting has no residual attack bonus");
+  assert(sting.system.damage.base.bonus === "" || sting.system.damage.base.bonus === "0", "Sting damage strips DEX");
+  assert(sting.flags?.dlfi?.predictedAttackBonus === 5, "Sting predicted to-hit +5");
 }
 
 // Unit: multi-part Hit parsing

@@ -95,25 +95,144 @@ export function normalizeDamageType(value) {
 }
 
 /**
+ * 5e proficiency bonus from challenge rating.
+ * @param {unknown} cr
+ * @returns {number|null}
+ */
+export function proficiencyBonusFromCr(cr) {
+  const n = Number(cr);
+  if (!Number.isFinite(n)) {
+    return null;
+  }
+  if (n <= 0) {
+    return 2;
+  }
+  return Math.min(9, 2 + Math.floor((Math.max(n, 1) - 1) / 4));
+}
+
+/**
+ * Pick STR vs DEX for a weapon attack so DLCE to-hit / damage mods line up.
+ * Melee defaults to STR, but uses DEX when the stated bonus matches DEX+prof
+ * (Imp Sting, finesse-like natural weapons, etc.).
+ *
+ * @returns {{ ability: "str"|"dex", mod: number|null }}
+ */
+export function resolveAttackAbility({
+  attackType = "melee",
+  strMod = null,
+  dexMod = null,
+  statedBonus = null,
+  proficiencyBonus = null,
+  damageBonus = null
+} = {}) {
+  const stated = Number(String(statedBonus ?? "").replace(/^\+/, ""));
+  const prof = Number(proficiencyBonus);
+  const str = Number.isFinite(Number(strMod)) ? Number(strMod) : null;
+  const dex = Number.isFinite(Number(dexMod)) ? Number(dexMod) : null;
+
+  if (attackType === "ranged") {
+    return { ability: "dex", mod: dex };
+  }
+
+  const candidates = [];
+  if (str != null) {
+    candidates.push({ ability: "str", mod: str });
+  }
+  if (dex != null && dex !== str) {
+    candidates.push({ ability: "dex", mod: dex });
+  }
+
+  if (Number.isFinite(stated) && Number.isFinite(prof) && candidates.length) {
+    const exact = candidates.find((c) => c.mod + prof === stated);
+    if (exact) {
+      return exact;
+    }
+    // Closest to stated to-hit (keeps residual bonus small).
+    let best = candidates[0];
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const dist = Math.abs(c.mod + prof - stated);
+      if (dist < bestDist) {
+        best = c;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }
+
+  if (damageBonus != null && Number.isFinite(Number(damageBonus)) && candidates.length) {
+    const byDamage = candidates.find((c) => c.mod === Number(damageBonus));
+    if (byDamage) {
+      return byDamage;
+    }
+  }
+
+  return { ability: "str", mod: str };
+}
+
+/**
+ * Predict the Foundry to-hit total for an attack activity config.
+ * flat:true → numeric bonus only; flat:false → ability + prof + bonus.
+ */
+export function predictFoundryAttackBonus(attackConfig, { abilityMod = null, proficiencyBonus = null } = {}) {
+  const bonus = Number(String(attackConfig?.bonus ?? "").replace(/^\+/, ""));
+  const extra = Number.isFinite(bonus) ? bonus : 0;
+  if (attackConfig?.flat) {
+    return extra;
+  }
+  const mod = Number(abilityMod);
+  const prof = Number(proficiencyBonus);
+  if (!Number.isFinite(mod) || !Number.isFinite(prof)) {
+    return null;
+  }
+  return mod + prof + extra;
+}
+
+/**
+ * Soft CR sanity band for monster attack bonuses (DMG-ish: PB + ability, with headroom).
+ * Returns null when CR/prof unknown.
+ *
+ * @returns {{ min: number, max: number, typical: number, proficiency: number }|null}
+ */
+export function attackBonusBandForCr(cr, { maxAbilityMod = 5 } = {}) {
+  const proficiency = proficiencyBonusFromCr(cr);
+  if (proficiency == null) {
+    return null;
+  }
+  const ability = Number.isFinite(Number(maxAbilityMod)) ? Number(maxAbilityMod) : 5;
+  // Typical = PB + ability; allow +3 magic/special before warning.
+  const typical = proficiency + Math.max(0, ability);
+  return {
+    proficiency,
+    typical,
+    min: proficiency,
+    max: typical + 3
+  };
+}
+
+/**
  * Decide attack activity configuration so to-hit matches the DLCE bonus when possible.
  * Prefer Foundry's normal mod+prof calculation (flat:false), matching SRD monsters.
+ * Always pin `ability` to str/dex when known so Foundry doesn't pick the wrong mod.
  */
 export function buildAttackConfig({
   attackBonus,
   abilityMod,
   proficiencyBonus,
-  attackType = "melee"
+  attackType = "melee",
+  ability = ""
 }) {
   const stated = Number(String(attackBonus ?? "").replace(/^\+/, ""));
   const mod = Number(abilityMod);
   const prof = Number(proficiencyBonus);
   const computed =
     Number.isFinite(mod) && Number.isFinite(prof) ? mod + prof : null;
+  const abilityKey = ability === "str" || ability === "dex" ? ability : "";
 
   if (Number.isFinite(stated) && computed != null && stated === computed) {
     return {
       flat: false,
-      ability: "",
+      ability: abilityKey,
       bonus: "",
       type: { value: attackType, classification: "weapon" }
     };
@@ -123,7 +242,7 @@ export function buildAttackConfig({
     const delta = stated - computed;
     return {
       flat: false,
-      ability: "",
+      ability: abilityKey,
       bonus: delta === 0 ? "" : String(delta),
       type: { value: attackType, classification: "weapon" }
     };
@@ -140,7 +259,7 @@ export function buildAttackConfig({
 
   return {
     flat: false,
-    ability: "",
+    ability: abilityKey,
     bonus: "",
     type: { value: attackType, classification: "weapon" }
   };
