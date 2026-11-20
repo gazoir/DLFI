@@ -63,12 +63,14 @@ const { parseWeaponBaseDamage, abilityModifier, predictFoundryBaseDamage } = awa
   "./damageFormula.mjs"
 );
 const {
+  buildChallengeHostLocations,
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
   formatPoisBulletList,
   locationDescriptionText,
   locationPois,
   locationSessionNotesText,
+  resolveChallengeHostLocationId,
   resolveColourBattlemapPath,
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
 } = await import("./packageLinks.mjs");
@@ -76,6 +78,13 @@ const {
   classifyLocationFieldDrawings,
   classifyLocationFieldLabel
 } = await import("./scenePlacement.mjs");
+const {
+  buildMsdSceneSequence,
+  formatSceneDmName,
+  isCombatChallengeEntry,
+  padSceneOrder
+} = await import("./sceneOrder.mjs");
+const { convertMsdHtmlForFoundry } = await import("./msdJournal.mjs");
 const {
   packageImportRoot,
   sessionInboxFolderName,
@@ -341,6 +350,62 @@ for (const path of paths) {
   assert(!String(path).includes("grid"), "do not use grid overlay art");
 }
 
+// DLCE v2: battlemaps live under assets/location/battlemaps/{locationId}
+{
+  const uploaded = new Map([
+    [
+      "assets/location/battlemaps/loc_village_approach.webp",
+      "dlfi-imports/pkg/assets/location/battlemaps/loc_village_approach.webp"
+    ],
+    [
+      "assets/location/loc_village_approach.webp",
+      "dlfi-imports/pkg/assets/location/loc_village_approach.webp"
+    ]
+  ]);
+  const path = resolveColourBattlemapPath({
+    entry: { id: "ch_s000_challenge", name: "Invisible Whispers", battlemap: null, locationIds: [] },
+    raw: { fields: { kind: "combat" }, links: [] },
+    locationEntry: {
+      id: "loc_village_approach",
+      battlemap: "assets/location/battlemaps/loc_village_approach.webp"
+    },
+    uploaded,
+    assetPaths: [...uploaded.keys()]
+  });
+  assert(
+    path === "dlfi-imports/pkg/assets/location/battlemaps/loc_village_approach.webp",
+    `location battlemap folder (got ${path})`
+  );
+
+  const hosts = buildChallengeHostLocations(
+    [{ id: "loc_village_approach", file: "documents/loc_village_approach.json" }],
+    (file) =>
+      file === "documents/loc_village_approach.json"
+        ? {
+            links: [
+              {
+                relation: "hosts",
+                target_id: "ch_s000_challenge",
+                target_type: "challenge"
+              }
+            ]
+          }
+        : null
+  );
+  assert(
+    hosts.get("ch_s000_challenge")?.[0] === "loc_village_approach",
+    "reverse host location from location→challenge link"
+  );
+  assert(
+    resolveChallengeHostLocationId(
+      { id: "ch_s000_challenge", locationIds: [] },
+      { links: [] },
+      hosts
+    ) === "loc_village_approach",
+    "resolveChallengeHostLocationId uses reverse hosts"
+  );
+}
+
 // Storage path helpers
 {
   const manifest = {
@@ -462,6 +527,217 @@ for (const path of paths) {
   assert(byId.npc_a === 2, "enemy count from challenge link");
   assert(byId.npc_b === 3, "enemy count from fields.enemies");
   assert(byId.npc_c === 1, "enemy from NPC→challenge link");
+}
+
+// Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded
+{
+  assert(padSceneOrder(1) === "01" && padSceneOrder(12) === "12", "padSceneOrder");
+  assert(
+    formatSceneDmName("location", { name: "Dock" }, 1) === "01. 📍 Dock",
+    "location DM name"
+  );
+  assert(
+    formatSceneDmName("battlemap", { name: "Ambush" }, 2) === "02. ⚔️ Ambush",
+    "battlemap DM name"
+  );
+  assert(
+    formatSceneDmName("battlemap", { name: "Invisible Whispers" }, 2) ===
+      "02. ⚔️ Invisible Whispers",
+    "battlemap emoji name format"
+  );
+  assert(
+    isCombatChallengeEntry({ type: "challenge", subtype: "combat" }, { fields: { kind: "combat" } }),
+    "combat challenge detected"
+  );
+  assert(
+    !isCombatChallengeEntry(
+      { type: "challenge", subtype: "dialogue" },
+      { fields: { kind: "dialogue" } }
+    ),
+    "dialogue challenge excluded"
+  );
+
+  const docs = {
+    "documents/ch_ambush.json": { fields: { kind: "combat" } },
+    "documents/ch_talk.json": { fields: { kind: "dialogue" } },
+    "documents/ch_brawl.json": { fields: { kind: "combat" } }
+  };
+  const readDocument = (file) => docs[file] ?? null;
+  const fallbackManifest = {
+    documents: [
+      { id: "loc_a", type: "location", name: "LocA", file: "documents/loc_a.json", msdOrder: 1 },
+      { id: "loc_b", type: "location", name: "LocB", file: "documents/loc_b.json", msdOrder: 2 },
+      { id: "loc_c", type: "location", name: "LocC", file: "documents/loc_c.json", msdOrder: 3 },
+      {
+        id: "ch_ambush",
+        type: "challenge",
+        name: "Ambush",
+        file: "documents/ch_ambush.json",
+        locationIds: ["loc_a"]
+      },
+      {
+        id: "ch_talk",
+        type: "challenge",
+        name: "Talk",
+        file: "documents/ch_talk.json",
+        locationIds: ["loc_a"],
+        subtype: "dialogue"
+      },
+      {
+        id: "ch_brawl",
+        type: "challenge",
+        name: "Brawl",
+        file: "documents/ch_brawl.json",
+        locationIds: ["loc_b"]
+      }
+    ]
+  };
+  const seq = buildMsdSceneSequence(fallbackManifest, { readDocument });
+  assert(
+    seq.map((row) => row.entry.id).join(",") === "loc_a,ch_ambush,loc_b,ch_brawl,loc_c",
+    `fallback sequence LocA→combat@A→LocB→combat@B→LocC (got ${seq.map((r) => r.entry.id).join(",")})`
+  );
+  assert(!seq.some((row) => row.entry.id === "ch_talk"), "dialogue combat excluded from sequence");
+  assert(seq[0].order === 1 && seq[1].kind === "battlemap", "orders start at 1; combat is battlemap");
+
+  // Unified msdOrder path (locations + combat challenges all ordered)
+  const unifiedManifest = {
+    documents: [
+      { id: "loc_c", type: "location", name: "LocC", file: "documents/loc_c.json", msdOrder: 4 },
+      { id: "loc_a", type: "location", name: "LocA", file: "documents/loc_a.json", msdOrder: 1 },
+      {
+        id: "ch_ambush",
+        type: "challenge",
+        name: "Ambush",
+        file: "documents/ch_ambush.json",
+        locationIds: ["loc_a"],
+        msdOrder: 2
+      },
+      { id: "loc_b", type: "location", name: "LocB", file: "documents/loc_b.json", msdOrder: 3 },
+      {
+        id: "ch_talk",
+        type: "challenge",
+        name: "Talk",
+        file: "documents/ch_talk.json",
+        locationIds: ["loc_b"],
+        subtype: "dialogue",
+        msdOrder: 99
+      }
+    ]
+  };
+  const unified = buildMsdSceneSequence(unifiedManifest, { readDocument });
+  assert(
+    unified.map((row) => row.entry.id).join(",") === "loc_a,ch_ambush,loc_b,loc_c",
+    `unified msdOrder sequence (got ${unified.map((r) => r.entry.id).join(",")})`
+  );
+  assert(
+    formatSceneDmName(unified[1].kind, unified[1].entry, unified[1].order) ===
+      "02. ⚔️ Ambush",
+    "unified battlemap keeps sequential DM name"
+  );
+
+  // Reverse hosts: combat with empty locationIds still interleaves after host location
+  const reverseHostDocs = {
+    "documents/loc_a.json": {
+      links: [{ target_type: "challenge", target_id: "ch_ambush", relation: "hosts" }]
+    },
+    "documents/ch_ambush.json": { fields: { kind: "combat" } },
+    "documents/ch_talk.json": { fields: { kind: "dialogue" } },
+    "documents/ch_brawl.json": { fields: { kind: "combat" } }
+  };
+  const reverseSeq = buildMsdSceneSequence(
+    {
+      documents: [
+        { id: "loc_a", type: "location", name: "LocA", file: "documents/loc_a.json", msdOrder: 1 },
+        { id: "loc_b", type: "location", name: "LocB", file: "documents/loc_b.json", msdOrder: 2 },
+        {
+          id: "ch_ambush",
+          type: "challenge",
+          name: "Ambush",
+          file: "documents/ch_ambush.json",
+          locationIds: []
+        },
+        {
+          id: "ch_talk",
+          type: "challenge",
+          name: "Talk",
+          file: "documents/ch_talk.json",
+          locationIds: [],
+          subtype: "dialogue"
+        }
+      ]
+    },
+    { readDocument: (file) => reverseHostDocs[file] ?? null }
+  );
+  assert(
+    reverseSeq.map((row) => row.entry.id).join(",") === "loc_a,ch_ambush,loc_b",
+    `reverse-host sequence (got ${reverseSeq.map((r) => r.entry.id).join(",")})`
+  );
+}
+
+// MSD → Foundry journal: title/h2 UUID links + ../assets rewrite + challenge h2
+{
+  const msdHtml = `<!doctype html>
+<article class="dlce-v2-msd-page dlce-v2-msd-title-page" data-msd-session-title="Misty Lake">
+  <div class="dlce-v2-msd-title-logo" role="img" aria-label="the Damned Lucky"></div>
+  <div class="dlce-v2-msd-title-session-name" data-msd-title="Misty Lake">Misty Lake</div>
+  <div class="dlce-v2-msd-h1" role="heading" aria-level="1">Contents</div>
+</article>
+<div class="dlce-v2-msd-flow-source" hidden aria-hidden="true">
+  <section class="dlce-v2-msd-location" data-msd-location-id="loc_a" data-msd-host-id="loc_a" data-msd-label="LocA" draggable="true">
+    <div class="dlce-v2-msd-h2" role="heading" aria-level="2"><h2>📍 LocA</h2></div>
+    <img class="dlce-v2-msd-art is-location" src="../assets/location/loc_a.webp" alt="LocA">
+    <p class="dlce-v2-msd-body">See <span data-msd-related-id="npc_kira">Kira</span>.</p>
+    <section class="dlce-v2-msd-child is-challenge" data-msd-wd-id="ch_ambush" data-msd-label="Ambush" draggable="true">
+      <div class="dlce-v2-msd-h3" role="heading" aria-level="3"><p>⚔️ Ambush</p></div>
+      <img src="../assets/location/battlemaps/loc_a.webp" alt="Ambush map">
+    </section>
+  </section>
+</div>
+<div class="dlce-v2-msd-appendix-source" hidden aria-hidden="true"><p>Appendix maps</p></div>`;
+
+  const createdByDlceId = new Map([
+    ["loc_a", "Scene.locA"],
+    ["ch_ambush", "Scene.ambush"],
+    ["npc_kira", "Actor.kira"]
+  ]);
+  const uploaded = new Map([
+    ["assets/location/loc_a.webp", "dlfi-imports/pkg/assets/location/loc_a.webp"],
+    [
+      "assets/location/battlemaps/loc_a.webp",
+      "dlfi-imports/pkg/assets/location/battlemaps/loc_a.webp"
+    ]
+  ]);
+  const documents = [
+    { id: "loc_a", type: "location", name: "LocA", portrait: "assets/location/loc_a.webp" },
+    { id: "ch_ambush", type: "challenge", name: "Ambush" }
+  ];
+  const journal = convertMsdHtmlForFoundry(msdHtml, { createdByDlceId, uploaded, documents });
+  assert(/<h1\b[^>]*>Misty Lake<\/h1>/.test(journal), "title session name promoted to h1");
+  assert(/<h1\b[^>]*>Contents<\/h1>/.test(journal), "msd h1 div promoted");
+  assert(!/<h2><h2>/.test(journal), "nested location h2 flattened");
+  assert(
+    journal.includes("@UUID[Scene.locA]{LocA}"),
+    "location h2 linked to scene UUID"
+  );
+  assert(
+    /<h2\b[^>]*>@UUID\[Scene\.ambush\]\{Ambush\}<\/h2>/.test(journal),
+    "challenge heading promoted to h2 with UUID"
+  );
+  assert(journal.includes("@UUID[Actor.kira]{Kira}"), "related-id span → @UUID");
+  assert(
+    /src="dlfi-imports\/pkg\/assets\/location\/loc_a\.webp"/.test(journal),
+    "../assets location art rewritten"
+  );
+  assert(
+    /src="dlfi-imports\/pkg\/assets\/location\/battlemaps\/loc_a\.webp"/.test(journal),
+    "../assets battlemap art rewritten"
+  );
+  assert(!/\.\.\/assets\//.test(journal), "no leftover ../assets paths");
+  assert(!/dlce-v2-msd-title-logo/.test(journal), "logo overlay stripped");
+  assert(!/\bdraggable=/.test(journal), "draggable attrs stripped");
+  assert(!/\bhidden\b/.test(journal) || !/flow-source/.test(journal), "flow chrome unwrapped");
+  assert(journal.includes("Appendix maps"), "appendix content included");
 }
 
 if (failures) {

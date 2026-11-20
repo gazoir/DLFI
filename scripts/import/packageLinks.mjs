@@ -60,8 +60,73 @@ export function collectNpcLocationIds(entry, raw, reverseLocationIds = []) {
 }
 
 /**
+ * Build challengeId → host locationId[] from location→challenge links.
+ * DLCE often stores "Hosts" only on the location; challenges may omit occurs_at.
+ *
+ * @param {Iterable<{ id: string, file?: string }>} locationEntries
+ * @param {(file: string) => object|null} readDocument
+ * @returns {Map<string, string[]>}
+ */
+export function buildChallengeHostLocations(locationEntries, readDocument) {
+  /** @type {Map<string, string[]>} */
+  const map = new Map();
+  for (const entry of locationEntries ?? []) {
+    const locationId = String(entry?.id ?? "");
+    if (!locationId) {
+      continue;
+    }
+    const raw = typeof readDocument === "function" ? readDocument(entry.file) : null;
+    for (const link of raw?.links ?? []) {
+      if (link?.target_type !== "challenge" || !link?.target_id) {
+        continue;
+      }
+      const challengeId = String(link.target_id);
+      const list = map.get(challengeId) ?? [];
+      if (!list.includes(locationId)) {
+        list.push(locationId);
+      }
+      map.set(challengeId, list);
+    }
+  }
+  return map;
+}
+
+/**
+ * Resolve the host location id for a combat challenge.
+ * Prefers manifest locationIds, then challenge→location links, then reverse hosts.
+ *
+ * @param {object} entry
+ * @param {object|null|undefined} raw
+ * @param {Map<string, string[]>} [hostByChallenge]
+ * @returns {string|null}
+ */
+export function resolveChallengeHostLocationId(entry, raw = null, hostByChallenge = null) {
+  for (const id of entry?.locationIds ?? []) {
+    if (id) {
+      return String(id);
+    }
+  }
+  for (const link of raw?.links ?? []) {
+    if (link?.target_type === "location" && link?.target_id) {
+      return String(link.target_id);
+    }
+  }
+  const challengeId = String(entry?.id ?? "");
+  if (challengeId && hostByChallenge?.has(challengeId)) {
+    const hosts = hostByChallenge.get(challengeId) ?? [];
+    if (hosts[0]) {
+      return String(hosts[0]);
+    }
+  }
+  return null;
+}
+
+/**
  * Prefer the colour (non-grid) battlemap asset for a combat encounter.
  * Grid overlays are skipped — Foundry draws its own grid.
+ *
+ * DLCE v2 stores maps at `assets/location/battlemaps/{locationId}.{ext}` on the
+ * location entry (not the challenge). Resolve via location.battlemap first.
  *
  * @param {{
  *   entry?: object,
@@ -85,11 +150,21 @@ export function resolveColourBattlemapPath({
     if (!packagePath) {
       return;
     }
-    const key = String(packagePath);
+    const key = String(packagePath).replace(/^\/+/, "").replace(/\\/g, "/");
     if (uploaded.has(key)) {
       candidates.push(key);
     }
   };
+
+  // Location-owned battlemap is the DLCE v2 source of truth.
+  push(locationEntry?.battlemap);
+  const locationId = String(locationEntry?.id ?? "").trim();
+  if (locationId) {
+    for (const ext of ["webp", "png", "jpg", "jpeg", "webm"]) {
+      push(`assets/location/battlemaps/${locationId}.${ext}`);
+      push(`assets/battlemaps/${locationId}.${ext}`);
+    }
+  }
 
   push(entry?.battlemap);
   push(raw?.fields?.battlemap);
@@ -97,7 +172,7 @@ export function resolveColourBattlemapPath({
   push(raw?.artwork?.battlemap?.path);
   push(raw?.artwork_by_style?.["90s CRPG"]?.battlemap?.path);
 
-  const idHints = [entry?.id, entry?.name, locationEntry?.id]
+  const idHints = [locationEntry?.id, entry?.id, entry?.name]
     .filter(Boolean)
     .map((value) =>
       String(value)
@@ -109,7 +184,8 @@ export function resolveColourBattlemapPath({
 
   for (const path of assetPaths ?? []) {
     const lower = String(path).toLowerCase();
-    const inBattlemapsFolder = /^assets\/battlemaps\//i.test(path);
+    const inBattlemapsFolder =
+      /^assets\/battlemaps\//i.test(path) || /^assets\/location\/battlemaps\//i.test(path);
     if (!inBattlemapsFolder && !lower.includes("battlemap")) {
       continue;
     }
@@ -123,8 +199,6 @@ export function resolveColourBattlemapPath({
     }
     push(path);
   }
-
-  push(locationEntry?.battlemap);
 
   const unique = [...new Set(candidates)];
   if (!unique.length) {
