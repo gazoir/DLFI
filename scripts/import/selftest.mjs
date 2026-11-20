@@ -96,7 +96,11 @@ const {
   isCombatChallengeEntry,
   padSceneOrder
 } = await import("./sceneOrder.mjs");
-const { buildPcActorData, parseDdbCharacterId } = await import("./buildPcActor.mjs");
+const {
+  buildPcActorData,
+  parseDdbCharacterId,
+  resolvePcKnownAs
+} = await import("./buildPcActor.mjs");
 const { convertMsdHtmlForFoundry } = await import("./msdJournal.mjs");
 const {
   packageImportRoot,
@@ -752,6 +756,32 @@ for (const path of paths) {
     tokenName: "Ibby"
   });
   assert(spec.name === "Ibby", "battlemap PC token name is knownAs");
+}
+
+// Landing PC slots use the same Known as resolution as battlemap / prototype
+{
+  const { tokenDisplayAlways, TOKEN_DISPLAY_ALWAYS } = await import("./tokenArt.mjs");
+  assert(
+    resolvePcKnownAs(
+      { name: "Isabella Brightblade", knownAs: "Ibby" },
+      { name: "Isabella Brightblade" }
+    ) === "Ibby",
+    "Landing knownAs prefers package knownAs"
+  );
+  assert(
+    resolvePcKnownAs(
+      { name: "Isabella Brightblade" },
+      { name: "Isabella Brightblade", prototypeToken: { name: "Ibby" } }
+    ) === "Ibby",
+    "Landing falls back to prototypeToken.name"
+  );
+  assert(
+    resolvePcKnownAs({ name: "Isabella Brightblade" }, { name: "Isabella Brightblade" }) ===
+      "Isabella",
+    "Landing falls back to first name"
+  );
+  assert(TOKEN_DISPLAY_ALWAYS === 50, "Foundry ALWAYS display mode is 50");
+  assert(tokenDisplayAlways() === 50, "Landing nameplates use Always Visible");
 }
 
 // Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded

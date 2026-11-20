@@ -16,7 +16,7 @@ import {
 } from "../constants.mjs";
 import { tokenDisplayHover } from "./tokenArt.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
-import { buildPcActorData } from "./buildPcActor.mjs";
+import { buildPcActorData, resolvePcKnownAs } from "./buildPcActor.mjs";
 import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
@@ -548,12 +548,7 @@ export async function importSessionPackage(loaded, options = {}) {
       // Re-imports: ensure matched PCs stay Friendly even if a prior stub was Hostile.
       patch["prototypeToken.disposition"] = TOKEN_DISPOSITION.FRIENDLY;
       patch["prototypeToken.displayName"] = tokenDisplayHover();
-      const knownAs =
-        String(pc.knownAs || "").trim() ||
-        String(pc.name || actor.name || "")
-          .trim()
-          .split(/\s+/)[0] ||
-        actor.name;
+      const knownAs = resolvePcKnownAs(pc, actor);
       if (knownAs) {
         patch["prototypeToken.name"] = knownAs;
       }
@@ -643,19 +638,13 @@ export async function importSessionPackage(loaded, options = {}) {
       );
       continue;
     }
-    const knownAs =
-      String(pc?.knownAs || "").trim() ||
-      String(pc?.name || actor.name || "")
-        .trim()
-        .split(/\s+/)[0] ||
-      actor.name;
     partyForBattlemaps.push({
       actor,
       linked: true,
       kind: "battle-pc",
       dlceId: pc?.id ? String(pc.id) : null,
       label: pc?.name || actor.name,
-      tokenName: knownAs
+      tokenName: resolvePcKnownAs(pc, actor)
     });
     for (const petRow of sessionPets) {
       if (String(petRow.ownerPcId) !== String(pc.id || "")) {

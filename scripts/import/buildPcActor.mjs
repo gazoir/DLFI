@@ -25,9 +25,25 @@ import { tokenDisplayHover } from "./tokenArt.mjs";
  *   importKey?: string
  * }} [media]
  */
+/**
+ * Token name for Landing / battlemap / prototype: Known as, else first name.
+ * @param {{ knownAs?: string|null, name?: string|null }|null|undefined} pc
+ * @param {{ name?: string|null, prototypeToken?: { name?: string|null } }|null|undefined} [actor]
+ * @returns {string}
+ */
+export function resolvePcKnownAs(pc, actor = null) {
+  const knownAs = String(pc?.knownAs || "").trim();
+  if (knownAs) return knownAs;
+  const protoName = String(actor?.prototypeToken?.name || "").trim();
+  if (protoName) return protoName;
+  const full = String(pc?.name || actor?.name || "").trim();
+  if (!full) return "Token";
+  return full.split(/\s+/)[0] || full;
+}
+
 export function buildPcActorData(pc, media = {}) {
   const name = String(pc?.name || "").trim() || "Unnamed PC";
-  const knownAs = String(pc?.knownAs || "").trim() || name.split(/\s+/)[0] || name;
+  const knownAs = resolvePcKnownAs(pc) || name;
   const ddbUrl = String(pc?.ddbUrl || "").trim() || null;
   const ddbId =
     (pc?.ddbId != null && String(pc.ddbId).trim()) ||

@@ -14,7 +14,12 @@
  */
 
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
-import { pickTokenTexture, tokenDisplayHover } from "./tokenArt.mjs";
+import { resolvePcKnownAs } from "./buildPcActor.mjs";
+import {
+  pickTokenTexture,
+  tokenDisplayAlways,
+  tokenDisplayHover
+} from "./tokenArt.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
@@ -632,18 +637,21 @@ async function placePcsOnScene(scene, pcs, slots) {
   const slotted = Math.min(pcs.length, slots.length);
 
   for (let i = 0; i < slotted; i += 1) {
-    const actor = pcs[i]?.actor;
+    const row = pcs[i];
+    const actor = row?.actor;
     const token = slots[i];
     if (!actor || !token) continue;
     used.add(token.id);
     const textureSrc = pickTokenTexture(actor, undefined, FLAG_SCOPE);
-    // Keep template x/y/width/height/texture.scale* — only bind actor + art.
+    const tokenName = resolvePcKnownAs(row?.pc, actor);
+    // Keep template x/y/width/height/texture.scale* — only bind actor + art + Known as.
     updates.push({
       _id: token.id,
-      name: actor.name,
+      name: tokenName,
       actorId: actor.id,
       actorLink: true,
       disposition: TOKEN_DISPOSITION.FRIENDLY,
+      displayName: tokenDisplayAlways(),
       ...(textureSrc ? { "texture.src": textureSrc } : {}),
       flags: {
         ...(token.flags ?? {}),
@@ -661,9 +669,11 @@ async function placePcsOnScene(scene, pcs, slots) {
   const anchor = slots[slots.length - 1] ?? null;
   const grid = Number(scene.grid?.size ?? scene.grid) || 100;
   for (let i = slotted; i < pcs.length; i += 1) {
-    const actor = pcs[i]?.actor;
+    const row = pcs[i];
+    const actor = row?.actor;
     if (!actor) continue;
     const textureSrc = pickTokenTexture(actor, undefined, FLAG_SCOPE);
+    const tokenName = resolvePcKnownAs(row?.pc, actor);
     const overflowIndex = i - slotted;
     const anchorScaleX = Number(anchor?.texture?.scaleX);
     const anchorScaleY = Number(anchor?.texture?.scaleY);
@@ -674,10 +684,11 @@ async function placePcsOnScene(scene, pcs, slots) {
       Number(anchor?.x ?? 0) + step * (overflowIndex + 1);
     const y = Number(anchor?.y ?? Math.floor((scene.height ?? 1080) * 0.75));
     create.push({
-      name: actor.name,
+      name: tokenName,
       actorId: actor.id,
       actorLink: true,
       disposition: TOKEN_DISPOSITION.FRIENDLY,
+      displayName: tokenDisplayAlways(),
       width,
       height,
       x,
