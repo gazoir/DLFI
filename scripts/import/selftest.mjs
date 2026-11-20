@@ -76,7 +76,10 @@ const {
 } = await import("./packageLinks.mjs");
 const {
   classifyLocationFieldDrawings,
-  classifyLocationFieldLabel
+  classifyLocationFieldLabel,
+  layoutBattlemapRosterLines,
+  sceneCanvasMetrics,
+  tokenPlacementSpec
 } = await import("./scenePlacement.mjs");
 const {
   buildMsdSceneSequence,
@@ -84,6 +87,7 @@ const {
   isCombatChallengeEntry,
   padSceneOrder
 } = await import("./sceneOrder.mjs");
+const { buildPcActorData, parseDdbCharacterId } = await import("./buildPcActor.mjs");
 const { convertMsdHtmlForFoundry } = await import("./msdJournal.mjs");
 const {
   packageImportRoot,
@@ -738,6 +742,128 @@ for (const path of paths) {
   assert(!/\bdraggable=/.test(journal), "draggable attrs stripped");
   assert(!/\bhidden\b/.test(journal) || !/flow-source/.test(journal), "flow chrome unwrapped");
   assert(journal.includes("Appendix maps"), "appendix content included");
+}
+
+// PC actor stub for DDB importer + battlemap roster layout
+{
+  assert(parseDdbCharacterId("https://www.dndbeyond.com/characters/118758199") === "118758199", "parse DDB id");
+  const stub = buildPcActorData(
+    {
+      id: "pc_ibby",
+      name: "Ibby",
+      ddbUrl: "https://www.dndbeyond.com/characters/118758199",
+      ddbId: "118758199"
+    },
+    { portrait: "world/ibby.webp", token: "world/ibby_token.webp", tokenScale: 1.1 }
+  );
+  assert(stub.type === "character", "PC stub is character");
+  assert(stub.flags?.ddbimporter?.dndbeyond?.url?.includes("118758199"), "DDB url flag");
+  assert(stub.flags?.ddbimporter?.dndbeyond?.characterId === "118758199", "DDB characterId flag");
+  assert(stub.prototypeToken?.actorLink === true, "PC prototype linked");
+  assert(stub.prototypeToken?.texture?.src === "world/ibby_token.webp", "PC token art");
+  assert(stub.prototypeToken?.texture?.scaleX === 1.1, "PC VTTTT scale");
+
+  const metrics = {
+    width: 4800,
+    height: 6600,
+    sceneWidth: 3200,
+    sceneHeight: 4400,
+    sceneX: 800,
+    sceneY: 1100,
+    mapBottom: 5500,
+    canvasBottom: 6600,
+    gridSize: 200
+  };
+  const enemySpecs = [
+    {
+      name: "Imp 1",
+      actorId: "a1",
+      actorUuid: "Actor.a1",
+      linked: false,
+      kind: "battle-enemy",
+      width: 1,
+      height: 1,
+      textureSrc: "imp.webp"
+    },
+    {
+      name: "Imp 2",
+      actorId: "a1",
+      actorUuid: "Actor.a1",
+      linked: false,
+      kind: "battle-enemy",
+      width: 1,
+      height: 1,
+      textureSrc: "imp.webp"
+    },
+    {
+      name: "Devil",
+      actorId: "a2",
+      actorUuid: "Actor.a2",
+      linked: false,
+      kind: "battle-enemy",
+      width: 2,
+      height: 2,
+      textureSrc: "devil.webp"
+    }
+  ];
+  const partySpecs = [
+    {
+      name: "Ibby",
+      actorId: "pc1",
+      actorUuid: "Actor.pc1",
+      linked: true,
+      kind: "battle-pc",
+      width: 1,
+      height: 1,
+      textureSrc: "ibby.webp"
+    },
+    {
+      name: "Owl",
+      actorId: "pet1",
+      actorUuid: "Actor.pet1",
+      linked: true,
+      kind: "battle-pet",
+      width: 0.5,
+      height: 0.5,
+      textureSrc: "owl.webp"
+    }
+  ];
+  const layout = layoutBattlemapRosterLines({
+    metrics,
+    grid: 200,
+    enemySpecs,
+    partySpecs
+  });
+  assert(layout.partyTokens.length === 2, "party tokens created");
+  assert(layout.enemyTokens.length === 3, "enemy tokens created");
+  assert(layout.partyBaseline === 6600, "party flush to canvas bottom");
+  // Large devil (2sq) sits lower than mediums on same baseline.
+  const devil = layout.enemyTokens.find((t) => t.name === "Devil");
+  const imp = layout.enemyTokens.find((t) => t.name === "Imp 1");
+  assert(devil && imp, "devil and imp present");
+  assert(devil.width === 2 && devil.height === 2, "enemy footprint copied");
+  // Same baseline at canvas bottom: Large tokens have smaller y (extend further up).
+  assert(devil.y < imp.y, "large enemy extends upward from shared baseline");
+  assert(devil.actorLink === false, "enemies unlinked");
+  assert(layout.partyTokens[0].actorLink === true, "PCs linked");
+  // Footprint spacing: devil starts after two 1-square imps + gaps
+  assert(devil.x > imp.x, "enemies spaced left-to-right by footprint");
+  // Enemy tops should sit at/below map bottom when padding allows
+  assert(imp.y >= metrics.mapBottom || devil.y >= metrics.mapBottom, "roster below map art when possible");
+
+  const fakeActor = {
+    id: "x",
+    uuid: "Actor.x",
+    name: "Ogre",
+    img: "ogre.png",
+    prototypeToken: { width: 2, height: 2, texture: { src: "ogre_token.png" } }
+  };
+  const spec = tokenPlacementSpec({ actor: fakeActor, linked: false, kind: "battle-enemy" });
+  assert(spec.width === 2 && spec.textureSrc === "ogre_token.png", "tokenPlacementSpec from prototype");
+
+  // sceneCanvasMetrics falls back when dimensions missing
+  const m = sceneCanvasMetrics({ width: 1000, height: 2000, grid: { size: 100 } });
+  assert(m.canvasBottom === 2000 && m.gridSize === 100, "sceneCanvasMetrics fallback");
 }
 
 if (failures) {

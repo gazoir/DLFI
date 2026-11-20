@@ -2,11 +2,12 @@
  * Place NPCs / descriptions onto cloned template scenes and remove unused slots.
  *
  * Template conventions (FOUNDRY_SYNC):
- * - NPC slots: 1A1, 2A1, 2A2, ...
- * - PC slots: 3P1 ... 6P6
+ * - Location/Landing NPC slots: 1A1, 2A1, 2A2, ...
+ * - Landing PC slots: 3P1 ... 6P6
  * - Location field drawings (by text/name): Description, POIs / Points of Interest,
  *   Session Notes… — plus legacy Description 1–3 (Description 4 is unused leftover)
- * - >4 NPCs beyond slots: extras in a line across the top of the scene
+ * - Battlemaps: ignore A#/P# placeholders; create enemy + party roster lines in
+ *   the bottom canvas padding (footprint-spaced, flush to canvas bottom)
  */
 
 import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
@@ -169,27 +170,205 @@ export async function finalizeUtilityScene(scene) {
 }
 
 /**
- * Place combat enemies as unlinked tokens on a battlemap, then remove unused A/P slots.
+ * Place combat enemies (unlinked) and party (linked PCs + pets) on a battlemap.
+ *
+ * Layout: two footprint-spaced rows flush to the canvas bottom (below the map
+ * art). Enemies on the upper row; PCs then their pets on the lower row.
+ * Template A#/P# placeholders are deleted — tokens are always created fresh.
+ *
  * @param {Scene} scene
- * @param {Array<{ actor: Actor, count?: number }>} enemies
+ * @param {{
+ *   enemies?: Array<{ actor: Actor, count?: number }>,
+ *   party?: Array<{ actor: Actor, linked?: boolean, kind?: string }>
+ * }} [options]
  */
-export async function finalizeBattlemapScene(scene, enemies = []) {
+export async function finalizeBattlemapScene(scene, options = {}) {
   if (!scene) return;
-  const expanded = [];
+  const enemies = options.enemies ?? (Array.isArray(options) ? options : []);
+  const party = options.party ?? [];
+
+  const expandedEnemies = [];
   for (const row of enemies) {
     const count = Math.max(1, Number(row?.count) || 1);
     for (let i = 0; i < count; i += 1) {
-      expanded.push({ actor: row.actor, suffix: count > 1 ? ` ${i + 1}` : "" });
+      expandedEnemies.push({
+        actor: row.actor,
+        linked: false,
+        kind: "battle-enemy",
+        suffix: count > 1 ? ` ${i + 1}` : ""
+      });
     }
   }
-  const npcSlots = listNpcSlots(scene);
-  const usedNpcIds = await placeEnemyTokensOnScene(scene, expanded, npcSlots);
+
+  const partyRows = (party ?? [])
+    .filter((row) => row?.actor)
+    .map((row) => ({
+      actor: row.actor,
+      linked: row.linked !== false,
+      kind: row.kind || "battle-party",
+      suffix: ""
+    }));
+
+  // Drop all template placeholders and managed field drawings on battlemaps.
   const deleteDrawingIds = listManagedFieldDrawings(scene).map((d) => d.id);
   const deleteTokenIds = [
-    ...npcSlots.map((t) => t.id).filter((id) => !usedNpcIds.has(id)),
+    ...listNpcSlots(scene).map((t) => t.id),
     ...listPcSlots(scene).map((t) => t.id)
   ];
   await deleteEmbedded(scene, deleteDrawingIds, deleteTokenIds);
+
+  const metrics = sceneCanvasMetrics(scene);
+  const grid = Math.max(1, Number(scene.grid?.size ?? metrics.gridSize ?? 100));
+  const enemySpecs = expandedEnemies.map((row) => tokenPlacementSpec(row));
+  const partySpecs = partyRows.map((row) => tokenPlacementSpec(row));
+
+  const layout = layoutBattlemapRosterLines({
+    metrics,
+    grid,
+    enemySpecs,
+    partySpecs
+  });
+
+  const create = [...layout.enemyTokens, ...layout.partyTokens];
+  if (create.length) {
+    await scene.createEmbeddedDocuments("Token", create);
+  }
+}
+
+/**
+ * Scene canvas metrics including padding / map art rectangle.
+ * @param {Scene} scene
+ */
+export function sceneCanvasMetrics(scene) {
+  const dims = scene?.dimensions ?? {};
+  const width = Number(dims.width ?? scene?.width ?? 4000) || 4000;
+  const height = Number(dims.height ?? scene?.height ?? 3000) || 3000;
+  const sceneWidth = Number(dims.sceneWidth ?? scene?.width ?? width) || width;
+  const sceneHeight = Number(dims.sceneHeight ?? scene?.height ?? height) || height;
+  const sceneX = Number(dims.sceneX ?? 0) || 0;
+  const sceneY = Number(dims.sceneY ?? 0) || 0;
+  const gridSize = Number(scene?.grid?.size ?? dims.size ?? 100) || 100;
+  return {
+    width,
+    height,
+    sceneWidth,
+    sceneHeight,
+    sceneX,
+    sceneY,
+    mapBottom: sceneY + sceneHeight,
+    canvasBottom: height,
+    gridSize
+  };
+}
+
+/**
+ * @param {{ actor: Actor, linked?: boolean, kind?: string, suffix?: string }} row
+ */
+export function tokenPlacementSpec(row) {
+  const actor = row.actor;
+  const proto = actor?.prototypeToken ?? {};
+  const width = Math.max(0.5, Number(proto.width) || 1);
+  const height = Math.max(0.5, Number(proto.height) || 1);
+  const textureSrc = proto?.texture?.src || actor?.img || null;
+  const scaleX = Number(proto?.texture?.scaleX);
+  const scaleY = Number(proto?.texture?.scaleY);
+  return {
+    name: `${actor.name}${row.suffix || ""}`,
+    actorId: actor.id,
+    actorUuid: actor.uuid,
+    linked: Boolean(row.linked),
+    kind: row.kind || "battle-token",
+    width,
+    height,
+    textureSrc,
+    scaleX: Number.isFinite(scaleX) && scaleX > 0 ? scaleX : undefined,
+    scaleY: Number.isFinite(scaleY) && scaleY > 0 ? scaleY : undefined
+  };
+}
+
+/**
+ * Compute Token create payloads for enemy + party rows flush to canvas bottom.
+ * Footprints are spaced horizontally; each row shares a baseline so Large+
+ * tokens sit lower (their top stays at/below the row above / map).
+ *
+ * @param {{
+ *   metrics: ReturnType<typeof sceneCanvasMetrics>,
+ *   grid: number,
+ *   enemySpecs: ReturnType<typeof tokenPlacementSpec>[],
+ *   partySpecs: ReturnType<typeof tokenPlacementSpec>[]
+ * }} opts
+ */
+export function layoutBattlemapRosterLines({
+  metrics,
+  grid,
+  enemySpecs = [],
+  partySpecs = []
+}) {
+  const gap = Math.max(8, Math.floor(grid * 0.25));
+  const rowGap = Math.max(16, Math.floor(grid * 0.5));
+  const maxPartyH = partySpecs.reduce((max, spec) => Math.max(max, spec.height), 0);
+  const maxEnemyH = enemySpecs.reduce((max, spec) => Math.max(max, spec.height), 0);
+
+  // Party baseline flush with canvas bottom; enemy baseline above party row.
+  const partyBaseline = metrics.canvasBottom;
+  let enemyBaseline =
+    partySpecs.length && maxPartyH > 0
+      ? partyBaseline - maxPartyH * grid - rowGap
+      : partyBaseline;
+  // Keep enemy tops at or below the map art bottom when padding allows.
+  if (maxEnemyH > 0) {
+    const minEnemyBaseline = metrics.mapBottom + maxEnemyH * grid;
+    if (enemyBaseline < minEnemyBaseline && minEnemyBaseline <= metrics.canvasBottom) {
+      enemyBaseline = minEnemyBaseline;
+    }
+  }
+
+  const centerLine = (specs, baseline) => {
+    if (!specs.length) {
+      return [];
+    }
+    const totalWidth =
+      specs.reduce((sum, spec) => sum + spec.width * grid, 0) + gap * (specs.length - 1);
+    const mapCenterX = metrics.sceneX + metrics.sceneWidth / 2;
+    let x = mapCenterX - totalWidth / 2;
+    // Keep the line on-canvas.
+    x = Math.max(0, Math.min(x, Math.max(0, metrics.width - totalWidth)));
+    return specs.map((spec) => {
+      const tokenWidthPx = spec.width * grid;
+      const tokenHeightPx = spec.height * grid;
+      const token = {
+        name: spec.name,
+        actorId: spec.actorId,
+        actorLink: spec.linked,
+        width: spec.width,
+        height: spec.height,
+        x: Math.round(x),
+        y: Math.round(baseline - tokenHeightPx),
+        flags: {
+          [FLAG_SCOPE]: {
+            kind: spec.kind,
+            actorUuid: spec.actorUuid
+          }
+        }
+      };
+      if (spec.textureSrc) {
+        token.texture = {
+          src: spec.textureSrc,
+          ...(spec.scaleX != null ? { scaleX: spec.scaleX } : {}),
+          ...(spec.scaleY != null ? { scaleY: spec.scaleY } : {})
+        };
+      }
+      x += tokenWidthPx + gap;
+      return token;
+    });
+  };
+
+  return {
+    enemyTokens: centerLine(enemySpecs, enemyBaseline),
+    partyTokens: centerLine(partySpecs, partyBaseline),
+    enemyBaseline,
+    partyBaseline
+  };
 }
 
 /**
@@ -276,69 +455,6 @@ async function applyLocationFieldDrawing(
       flags: { [FLAG_SCOPE]: { kind, used: true } }
     }
   ]);
-}
-
-async function placeEnemyTokensOnScene(scene, enemies, slots) {
-  const used = new Set();
-  const updates = [];
-  const create = [];
-
-  for (let i = 0; i < enemies.length; i += 1) {
-    const actor = enemies[i]?.actor;
-    if (!actor) continue;
-    const textureSrc = actor.prototypeToken?.texture?.src || actor.img || null;
-    const name = `${actor.name}${enemies[i].suffix || ""}`;
-
-    if (i < slots.length) {
-      const token = slots[i];
-      used.add(token.id);
-      updates.push({
-        _id: token.id,
-        name,
-        actorId: actor.id,
-        actorLink: false,
-        ...(textureSrc ? { "texture.src": textureSrc } : {}),
-        flags: {
-          ...(token.flags ?? {}),
-          [FLAG_SCOPE]: {
-            kind: "battle-enemy",
-            used: true,
-            slot: token.name,
-            actorUuid: actor.uuid
-          }
-        }
-      });
-      continue;
-    }
-
-    const index = i - slots.length;
-    const width = scene.width ?? 4000;
-    const height = scene.height ?? 3000;
-    const count = Math.max(enemies.length - slots.length, 1);
-    const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
-    const rows = Math.max(1, Math.ceil(count / cols));
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    const xPad = Math.max(120, Math.floor(width / (cols + 1)));
-    const yPad = Math.max(120, Math.floor(height / (rows + 1)));
-    create.push({
-      name,
-      actorId: actor.id,
-      actorLink: false,
-      x: xPad * (col + 1),
-      y: yPad * (row + 1),
-      ...(textureSrc ? { texture: { src: textureSrc } } : {}),
-      flags: { [FLAG_SCOPE]: { kind: "battle-enemy", actorUuid: actor.uuid } }
-    });
-  }
-
-  if (updates.length) {
-    await scene.updateEmbeddedDocuments("Token", updates);
-  }
-  if (create.length) {
-    await scene.createEmbeddedDocuments("Token", create);
-  }
-  return used;
 }
 
 async function placeNpcsOnScene(scene, npcs, slots) {

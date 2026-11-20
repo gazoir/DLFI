@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.16`)
+## Status (`0.1.17`)
 
 Working in this slice:
 
@@ -21,7 +21,8 @@ Working in this slice:
 - **DLCE inbox** (`Data/dlce-inbox`): zip-only, auto-created, Browse… picker, nested as `Session Code · Session Name`, keeps 3 newest zips per session
 - **DLFI imports** (`Data/dlfi-imports`): separate tree mirroring the Session Package zip layout under `assets/` (ready for DLCE WD-type folders)
 - Template placement: fill dedicated Location drawings — **Description** (description/appearance), **POIs** (bullet list), **Session Notes** — delete empty/unused boxes (incl. legacy Description 4); bind NPCs to `1A#` slots (actor + token art) including reverse location→NPC links, PCs to `3P#`–`6P#` on Landing, delete unused placeholders
-- Battlemaps use the colour (non-grid) combat art and place unlinked enemy tokens from the encounter
+- Battlemaps use the colour (non-grid) combat art; place unlinked enemies then linked PCs+pets in two footprint-spaced rows flush to the canvas bottom (below map art), with correct token size
+- PCs: match by DDB id/name or create a character stub with DDB Beyond URL flags + package portrait/token; pets from `pcs[].pets` become NPC actors with combat stats
 - Leftovers holds NPCs/items not placed on any location or battlemap
 - NPC actors mapped from DLCE check_*/creature_*/combat_* fields; weapon damage strips ability mod for Foundry’s auto-`@mod`; items + “Items by location” journal; MSD journal
 - Exclusive scene navigation; Landing activated

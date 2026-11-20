@@ -18,8 +18,8 @@
   "properties": {
     "packageFormatVersion": {
       "type": "integer",
-      "const": 1,
-      "description": "Bump when DLFI must change how it reads packages."
+      "const": 3,
+      "description": "Bump when DLFI must change how it reads packages. v3 adds assets/Landing Page/ session-art variants (Clean, Logo_Burn, Logo_Only, Title_Only); sessionArt points at Logo_Burn when present."
     },
     "exportedAt": {
       "type": "string",
@@ -41,28 +41,28 @@
     },
     "sessionArt": {
       "type": ["string", "null"],
-      "description": "Legacy single session/landing image path (prefer landingPage.logoBurn)."
+      "description": "Landing scene image. Prefer landingPage.logoBurn (v3); falls back to Clean or assets/session/."
     },
     "landingPage": {
       "type": ["object", "null"],
       "additionalProperties": false,
-      "description": "Session artwork slides under Landing Page/ (or assets/Landing Page/).",
+      "description": "Session artwork variants under assets/Landing Page/. logoBurn is the Foundry Landing background.",
       "properties": {
         "clean": {
           "type": ["string", "null"],
-          "description": "Raw session image (no logo/title)."
+          "description": "Raw session art path"
         },
         "logoBurn": {
           "type": ["string", "null"],
-          "description": "Logo + title burned into the session image; DLFI uses this as the Landing scene background."
+          "description": "Logo + title burned onto session art — Landing scene background"
         },
         "logoOnly": {
           "type": ["string", "null"],
-          "description": "Full 16:9 logo on transparency for dropping onto scenes."
+          "description": "Full-resolution transparent PNG with logo only"
         },
         "titleOnly": {
           "type": ["string", "null"],
-          "description": "Full 16:9 title on transparency for dropping onto scenes."
+          "description": "Full-resolution transparent PNG with title only"
         }
       }
     },
@@ -81,17 +81,51 @@
     "assets": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["portraits", "tokens", "battlemaps", "session"],
+      "required": [
+        "challenge",
+        "event",
+        "faction",
+        "item",
+        "landingPage",
+        "location",
+        "note",
+        "npc",
+        "pc",
+        "secret",
+        "tokens",
+        "battlemaps",
+        "session"
+      ],
       "properties": {
-        "portraits": { "type": "array", "items": { "type": "string" } },
-        "tokens": { "type": "array", "items": { "type": "string" } },
-        "battlemaps": { "type": "array", "items": { "type": "string" } },
-        "session": { "type": "array", "items": { "type": "string" } },
+        "challenge": { "type": "array", "items": { "type": "string" } },
+        "event": { "type": "array", "items": { "type": "string" } },
+        "faction": { "type": "array", "items": { "type": "string" } },
+        "item": { "type": "array", "items": { "type": "string" } },
         "landingPage": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Paths under Landing Page/ (Clean, Logo_Burn, Logo_Only, Title_Only)."
-        }
+          "description": "Clean / Logo_Burn / Logo_Only / Title_Only under assets/Landing Page/"
+        },
+        "location": { "type": "array", "items": { "type": "string" } },
+        "note": { "type": "array", "items": { "type": "string" } },
+        "npc": { "type": "array", "items": { "type": "string" } },
+        "pc": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Seated PC portraits under assets/pc/"
+        },
+        "secret": { "type": "array", "items": { "type": "string" } },
+        "tokens": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Standing/VTT tokens; paths nest under assets/{type}/tokens/"
+        },
+        "battlemaps": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Location battle maps under assets/location/battlemaps/"
+        },
+        "session": { "type": "array", "items": { "type": "string" } }
       }
     }
   },
@@ -121,9 +155,22 @@
           "description": "Package-relative path under documents/"
         },
         "subtype": { "type": "string" },
-        "portrait": { "type": ["string", "null"] },
-        "token": { "type": ["string", "null"] },
-        "battlemap": { "type": ["string", "null"] },
+        "portrait": {
+          "type": ["string", "null"],
+          "description": "Primary art path under assets/{type}/"
+        },
+        "token": {
+          "type": ["string", "null"],
+          "description": "Token path under assets/{type}/tokens/"
+        },
+        "tokenScale": {
+          "type": ["number", "null"],
+          "description": "Foundry prototype token scale. 1.1 when token is a VTTTT bake (margin around the circle for Pseudo3d)."
+        },
+        "battlemap": {
+          "type": ["string", "null"],
+          "description": "Battle map path under assets/location/battlemaps/"
+        },
         "locationIds": {
           "type": "array",
           "items": { "type": "string" },
@@ -131,7 +178,7 @@
         },
         "msdOrder": {
           "type": ["integer", "null"],
-          "description": "1-based MSD appearance order for locations and combat challenges (unified sequence). Non-combat challenges omit this."
+          "description": "1-based MSD narrative order for locations and combat challenges (interleaved from buildMsdFlow). Null for other document types and non-combat challenges."
         }
       }
     },
@@ -140,11 +187,54 @@
       "additionalProperties": false,
       "required": ["name"],
       "properties": {
+        "id": {
+          "type": ["string", "null"],
+          "description": "DLCE World Document id for this PC (pet ownership)."
+        },
         "name": { "type": "string" },
+        "playerName": {
+          "type": ["string", "null"],
+          "description": "IRL player display name assigned to this PC when known."
+        },
         "ddbId": { "type": ["string", "null"] },
         "ddbUrl": { "type": ["string", "null"] },
+        "portrait": {
+          "type": ["string", "null"],
+          "description": "Package path under assets/pc/ when art was copied."
+        },
+        "token": {
+          "type": ["string", "null"],
+          "description": "Package path under assets/pc/tokens/ (VTTTT or standing)."
+        },
+        "tokenScale": {
+          "type": ["number", "null"],
+          "description": "Foundry prototype token scale when token is a VTTTT bake (typically 1.1)."
+        },
+        "pets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/petEntry" },
+          "description": "Living pets owned by this seated PC."
+        }
+      }
+    },
+    "petEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "file", "ownerPcId"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "file": {
+          "type": "string",
+          "description": "Package-relative documents/{id}.json with combat fields."
+        },
+        "ownerPcId": {
+          "type": "string",
+          "description": "DLCE PC id matching pcs[].id."
+        },
         "portrait": { "type": ["string", "null"] },
-        "token": { "type": ["string", "null"] }
+        "token": { "type": ["string", "null"] },
+        "tokenScale": { "type": ["number", "null"] }
       }
     }
   }

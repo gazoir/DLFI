@@ -13,6 +13,7 @@ import {
   SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
+import { buildPcActorData } from "./buildPcActor.mjs";
 import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
@@ -445,6 +446,7 @@ export async function importSessionPackage(loaded, options = {}) {
     const actorData = buildNpcNpcActorData(raw, entry, {
       portrait,
       token,
+      tokenScale: entry.tokenScale,
       folderId: folders.Actor?.id ?? null,
       importKey
     });
@@ -467,6 +469,89 @@ export async function importSessionPackage(loaded, options = {}) {
     }
   }
 
+  // --- PCs (match existing or create DDB-ready stubs) + pets as NPC actors ---
+  /** @type {Array<{ actor: Actor, pc: object }>} */
+  const sessionPcs = [];
+  /** @type {Map<string, Actor>} dlce pc id → actor */
+  const pcActorsByDlceId = new Map();
+  /** @type {Array<{ actor: Actor, ownerPcId: string, pet: object }>} */
+  const sessionPets = [];
+
+  for (const pc of manifest.pcs ?? []) {
+    const portrait = pc.portrait ? uploaded.get(pc.portrait) || null : null;
+    const token = pc.token ? uploaded.get(pc.token) || null : null;
+    let actor = matchExistingPcActor(pc);
+    if (actor) {
+      const patch = {};
+      if (portrait && actor.img !== portrait) {
+        patch.img = portrait;
+      }
+      if (token) {
+        patch["prototypeToken.texture.src"] = token;
+      }
+      if (pc.tokenScale != null && Number(pc.tokenScale) > 0) {
+        patch["prototypeToken.texture.scaleX"] = Number(pc.tokenScale);
+        patch["prototypeToken.texture.scaleY"] = Number(pc.tokenScale);
+      }
+      if (Object.keys(patch).length) {
+        await actor.update(patch);
+      }
+    } else {
+      const actorData = buildPcActorData(pc, {
+        portrait,
+        token,
+        tokenScale: pc.tokenScale,
+        folderId: folders.Actor?.id ?? null,
+        importKey
+      });
+      actor = await Actor.create(actorData);
+      console.log(
+        `${MODULE_ID} | created PC stub ${actor.name}` +
+          (pc.ddbUrl ? ` (DDB ${pc.ddbId || pc.ddbUrl})` : "")
+      );
+    }
+    if (pc.id) {
+      createdByDlceId.set(pc.id, actor.uuid);
+      pcActorsByDlceId.set(String(pc.id), actor);
+    }
+    sessionPcs.push({ actor, pc });
+
+    for (const pet of pc.pets ?? []) {
+      const petRaw = readDocument(pet.file) ?? { id: pet.id, name: pet.name, fields: {} };
+      const petEntry = {
+        id: pet.id,
+        name: pet.name,
+        type: "npc",
+        subtype: "pet",
+        portrait: pet.portrait,
+        token: pet.token,
+        tokenScale: pet.tokenScale
+      };
+      const petMedia = resolveNpcMedia(petEntry, uploaded);
+      const petActorData = buildNpcNpcActorData(petRaw, petEntry, {
+        portrait: petMedia.portrait,
+        token: petMedia.token,
+        tokenScale: pet.tokenScale,
+        folderId: folders.Actor?.id ?? null,
+        importKey
+      });
+      petActorData.flags = {
+        ...(petActorData.flags ?? {}),
+        [FLAG_SCOPE]: {
+          ...(petActorData.flags?.[FLAG_SCOPE] ?? {}),
+          kind: "pet",
+          ownerPcId: pet.ownerPcId || pc.id || null,
+          dlceId: pet.id
+        }
+      };
+      const petActor = await Actor.create(petActorData);
+      createdByDlceId.set(pet.id, petActor.uuid);
+      actorsByDlceId.set(pet.id, petActor);
+      sessionPets.push({ actor: petActor, ownerPcId: String(pet.ownerPcId || pc.id || ""), pet });
+      placedNpcIds.add(pet.id);
+    }
+  }
+
   // Bind NPCs into location template slots, fill descriptions, remove unused placeholders
   for (const meta of locationSceneMeta.values()) {
     await finalizeLocationScene(meta.scene, {
@@ -477,11 +562,24 @@ export async function importSessionPackage(loaded, options = {}) {
     });
   }
 
-  // Battlemap enemy tokens (unlinked)
+  // Battlemap: enemies (unlinked) + party PCs/pets (linked) in bottom padding lines
   const npcDocumentsForLinks = npcRecords.map((row) => ({
     id: row.entry.id,
     raw: row.raw
   }));
+  const partyForBattlemaps = [];
+  for (const { actor, pc } of sessionPcs) {
+    partyForBattlemaps.push({ actor, linked: true, kind: "battle-pc" });
+    for (const petRow of sessionPets) {
+      if (String(petRow.ownerPcId) === String(pc.id || "")) {
+        partyForBattlemaps.push({
+          actor: petRow.actor,
+          linked: true,
+          kind: "battle-pet"
+        });
+      }
+    }
+  }
   for (const meta of battlemapMeta) {
     const enemies = collectChallengeEnemies(meta.entry, meta.raw, {
       npcDocuments: npcDocumentsForLinks
@@ -496,19 +594,11 @@ export async function importSessionPackage(loaded, options = {}) {
         return { actor, count };
       })
       .filter(Boolean);
-    await finalizeBattlemapScene(meta.scene, enemies);
+    await finalizeBattlemapScene(meta.scene, { enemies, party: partyForBattlemaps });
   }
 
-  // Landing PC slots (match existing world actors by DDB id then name)
-  const matchedPcs = [];
-  for (const pc of manifest.pcs ?? []) {
-    const actor = matchExistingPcActor(pc);
-    if (actor) {
-      matchedPcs.push({ actor, pc });
-    }
-  }
   if (landingScene) {
-    await finalizeLandingScene(landingScene, matchedPcs);
+    await finalizeLandingScene(landingScene, sessionPcs);
   }
 
   // --- Items ---
