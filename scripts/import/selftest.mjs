@@ -937,6 +937,38 @@ for (const path of paths) {
   // sceneCanvasMetrics falls back when dimensions missing
   const m = sceneCanvasMetrics({ width: 1000, height: 2000, grid: { size: 100 } });
   assert(m.canvasBottom === 2000 && m.gridSize === 100, "sceneCanvasMetrics fallback");
+
+  const { finalizeBattlemapScene } = await import("./scenePlacement.mjs");
+  const warns = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warns.push(args.map(String).join(" "));
+  try {
+    const stubScene = {
+      name: "Ambush",
+      width: 4000,
+      height: 3000,
+      grid: { size: 100 },
+      dimensions: { width: 4000, height: 3000, sceneWidth: 4000, sceneHeight: 3000, sceneX: 0, sceneY: 0 },
+      tokens: [],
+      drawings: [],
+      async deleteEmbeddedDocuments() {
+        return [];
+      },
+      async createEmbeddedDocuments() {
+        return [];
+      }
+    };
+    await finalizeBattlemapScene(stubScene, {
+      enemies: [],
+      party: [{ actor: null, dlceId: "pc_ibby", label: "Ibby", kind: "battle-pc" }]
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert(
+    warns.some((line) => /skipped party token pc_ibby/.test(line) && /no actor/.test(line)),
+    "party skip logs pc id and reason"
+  );
 }
 
 // Prototype tokens: lock rotation, hover names, combat unlink, wildcard art
