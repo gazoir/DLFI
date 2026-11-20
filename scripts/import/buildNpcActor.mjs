@@ -11,10 +11,15 @@
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
 import {
   abilityModifier,
+  attackBonusBandForCr,
   buildAttackConfig,
+  parseDiceFormula,
   parseExtraDamagePart,
   parseWeaponBaseDamage,
-  predictFoundryBaseDamage
+  predictFoundryAttackBonus,
+  predictFoundryBaseDamage,
+  proficiencyBonusFromCr,
+  resolveAttackAbility
 } from "./damageFormula.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import { tokenDisplayHover, wildcardPrototypeTokenPatch } from "./tokenArt.mjs";
@@ -466,21 +471,67 @@ function buildWeaponFromAttack(attack, fields) {
   const strMod = abilityModifier(firstNumber(fields, ["check_str", "combat_str", "str"]));
   const dexMod = abilityModifier(firstNumber(fields, ["check_dex", "combat_dex", "dex"]));
   const attackType = inferAttackType(name, fields.combat_actions);
-  const abilityMod = attackType === "ranged" ? dexMod : strMod;
+  const statedBonus = String(attack.bonus || fields.combat_attack_bonus || "").trim();
+  const cr = firstNumber(fields, ["combat_cr", "cr", "challenge", "challenge_rating"]);
+  const prof =
+    firstNumber(fields, ["check_prof", "combat_prof", "proficiency", "proficiency_bonus"]) ??
+    proficiencyBonusFromCr(cr ?? 1);
+  const damageBonus = (() => {
+    const parsed = parseDiceFormula(primary.dice);
+    if (parsed.custom || parsed.bonus === "") {
+      return null;
+    }
+    const n = Number(parsed.bonus);
+    return Number.isFinite(n) ? n : null;
+  })();
+  // Imp Sting etc.: melee to-hit matches DEX+prof even though attackType is melee.
+  const resolved = resolveAttackAbility({
+    attackType,
+    strMod,
+    dexMod,
+    statedBonus,
+    proficiencyBonus: prof,
+    damageBonus
+  });
+  const abilityMod = resolved.mod;
   const baseDamage = parseWeaponBaseDamage(primary.dice, { abilityMod });
   const damageType = String(primary.type || "bludgeoning").toLowerCase();
   const reach = inferReachFeet(name, fields.combat_actions) ?? attack.reach ?? null;
   const activityId = randomId();
   const extraParts = damages.slice(1).map((part) => parseExtraDamagePart(part.dice, part.type));
 
-  const statedBonus = String(attack.bonus || fields.combat_attack_bonus || "").trim();
-  const prof = firstNumber(fields, ["check_prof", "combat_prof", "proficiency", "proficiency_bonus"]);
   const attackConfig = buildAttackConfig({
     attackBonus: statedBonus,
     abilityMod,
     proficiencyBonus: prof,
-    attackType
+    attackType,
+    ability: resolved.ability
   });
+
+  const predictedToHit = predictFoundryAttackBonus(attackConfig, {
+    abilityMod,
+    proficiencyBonus: prof
+  });
+  const statedToHit = Number(String(statedBonus ?? "").replace(/^\+/, ""));
+  if (
+    Number.isFinite(statedToHit) &&
+    predictedToHit != null &&
+    predictedToHit !== statedToHit
+  ) {
+    console.warn(
+      `${MODULE_ID} | ${name} to-hit mismatch: DLCE ${statedBonus} → Foundry ~+${predictedToHit}` +
+        ` (ability=${resolved.ability}, flat=${attackConfig.flat}, bonus="${attackConfig.bonus}")`
+    );
+  }
+  const band = attackBonusBandForCr(cr ?? 1, {
+    maxAbilityMod: Math.max(strMod ?? 0, dexMod ?? 0)
+  });
+  if (band && predictedToHit != null && predictedToHit > band.max) {
+    console.warn(
+      `${MODULE_ID} | ${name} to-hit +${predictedToHit} is high for CR ${cr ?? 1}` +
+        ` (expected ≤ +${band.max}; typical ~+${band.typical}). Check ability/prof double-count.`
+    );
+  }
 
   const prediction = predictFoundryBaseDamage(baseDamage, {
     abilityMod,
@@ -572,7 +623,10 @@ function buildWeaponFromAttack(attack, fields) {
         kind: "weapon-attack",
         dlceDamage: primary.dice,
         foundryDamageFormula: prediction.formula,
-        strippedAbilityMod: baseDamage.strippedAbilityMod
+        strippedAbilityMod: baseDamage.strippedAbilityMod,
+        attackAbility: resolved.ability,
+        statedAttackBonus: statedBonus || null,
+        predictedAttackBonus: predictedToHit
       }
     }
   };
