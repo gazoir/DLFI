@@ -8,7 +8,7 @@
  * - Attacks: combat_attacks JSON string + combat_actions markdown
  */
 
-import { FLAG_SCOPE } from "../constants.mjs";
+import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
 import {
   abilityModifier,
   buildAttackConfig,
@@ -17,7 +17,6 @@ import {
   predictFoundryBaseDamage
 } from "./damageFormula.mjs";
 import { markdownToHtml } from "./markdown.mjs";
-import { MODULE_ID } from "../constants.mjs";
 import { tokenDisplayHover, wildcardPrototypeTokenPatch } from "./tokenArt.mjs";
 
 const ABILITY_KEYS = ["str", "dex", "con", "int", "wis", "cha"];
@@ -133,6 +132,10 @@ export function buildNpcNpcActorData(raw, entry, media = {}) {
     {
       name,
       actorLink: !media.combatEnemy,
+      // Location / non-combat NPCs: Neutral. Combat enemies: Hostile.
+      disposition: media.combatEnemy
+        ? TOKEN_DISPOSITION.HOSTILE
+        : TOKEN_DISPOSITION.NEUTRAL,
       lockRotation: true,
       displayName: tokenDisplayHover(),
       width: tokenSize,

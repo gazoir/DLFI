@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.23`)
+## Status (`0.1.24`)
 
 Working in this slice:
 
@@ -33,6 +33,7 @@ Working in this slice:
 - **0.1.21:** battlemap party placement logs skipped PC/pet ids and reasons when `manifest.pcs` is non-empty but tokens are not placed
 - **0.1.22:** Landing PC placement picks the party-size `{n}P*` row from the world Landing template (2→centred `4P2`/`4P3`; 7+ overflows past `6P6`); keeps template position/scale; PCs only
 - **0.1.23:** Landing background = Clean; Logo Only / Title Only art replace named template tiles
+- **0.1.24:** PC tokens Friendly; location NPC tokens Neutral (combat enemies stay Hostile)
 
 Still stubbed: Pack-to-Archive, spell-pack lookup, full PC DDB matching polish.
 

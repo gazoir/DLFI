@@ -5,7 +5,7 @@
  * `characterId`) so the importer can attach without re-creating the actor.
  */
 
-import { FLAG_SCOPE } from "../constants.mjs";
+import { FLAG_SCOPE, TOKEN_DISPOSITION } from "../constants.mjs";
 
 /**
  * @param {{
@@ -55,6 +55,7 @@ export function buildPcActorData(pc, media = {}) {
     prototypeToken: {
       name,
       actorLink: true,
+      disposition: TOKEN_DISPOSITION.FRIENDLY,
       width: 1,
       height: 1,
       texture: {

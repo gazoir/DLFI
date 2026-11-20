@@ -648,7 +648,7 @@ for (const path of paths) {
   assert(layout.enemyTokens[0].disposition === -1, "enemy token disposition hostile");
   assert(layout.enemyTokens[0].actorLink === false, "enemy token unlinked");
   assert(layout.partyTokens[0].actorLink === true, "PC token linked");
-  assert(layout.partyTokens[0].disposition === undefined, "PC token disposition untouched");
+  assert(layout.partyTokens[0].disposition === 1, "PC token disposition Friendly");
 }
 
 // Scene sequence: LocA → combat@A → LocB → LocC; dialogue combat excluded
@@ -878,6 +878,7 @@ for (const path of paths) {
   assert(stub.flags?.ddbimporter?.dndbeyond?.url?.includes("118758199"), "DDB url flag");
   assert(stub.flags?.ddbimporter?.dndbeyond?.characterId === "118758199", "DDB characterId flag");
   assert(stub.prototypeToken?.actorLink === true, "PC prototype linked");
+  assert(stub.prototypeToken?.disposition === 1, "PC prototype Friendly");
   assert(stub.prototypeToken?.texture?.src === "world/ibby_token.webp", "PC token art");
   assert(stub.prototypeToken?.texture?.scaleX === 1.1, "PC VTTTT scale");
 
@@ -963,7 +964,10 @@ for (const path of paths) {
   // Same baseline at canvas bottom: Large tokens have smaller y (extend further up).
   assert(devil.y < imp.y, "large enemy extends upward from shared baseline");
   assert(devil.actorLink === false, "enemies unlinked");
+  assert(devil.disposition === -1, "enemies Hostile");
   assert(layout.partyTokens[0].actorLink === true, "PCs linked");
+  assert(layout.partyTokens[0].disposition === 1, "party Friendly");
+  assert(layout.partyTokens[1].disposition === 1, "pets Friendly");
   // Footprint spacing: devil starts after two 1-square imps + gaps
   assert(devil.x > imp.x, "enemies spaced left-to-right by footprint");
   // Enemy tops should sit at/below map bottom when padding allows
@@ -1033,11 +1037,13 @@ for (const path of paths) {
 
   const friendly = buildNpcNpcActorData(baseRaw, baseEntry, { token: "w/goblin.webp" });
   assert(friendly.prototypeToken.actorLink === true, "non-combat NPC stays linked");
+  assert(friendly.prototypeToken.disposition === 0, "non-combat NPC prototype Neutral");
   assert(friendly.prototypeToken.lockRotation === true, "NPC lockRotation on");
   assert(friendly.prototypeToken.displayName === 30, "NPC displayName is Hovered by Anyone (30)");
 
   const enemy = buildNpcNpcActorData(baseRaw, baseEntry, { token: "w/goblin.webp", combatEnemy: true });
   assert(enemy.prototypeToken.actorLink === false, "combat enemy prototype unlinked");
+  assert(enemy.prototypeToken.disposition === -1, "combat enemy prototype Hostile");
   assert(enemy.prototypeToken.lockRotation === true, "combat enemy lockRotation on");
   assert(enemy.prototypeToken.displayName === 30, "combat enemy displayName hover");
   assert(!enemy.prototypeToken.randomImg, "single token does not randomise");

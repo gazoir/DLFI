@@ -13,7 +13,7 @@
  *   the bottom canvas padding (footprint-spaced, flush to canvas bottom)
  */
 
-import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
 import { pickTokenTexture, tokenDisplayHover } from "./tokenArt.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
@@ -272,6 +272,7 @@ export async function finalizeBattlemapScene(scene, options = {}) {
       actor: row.actor,
       linked: row.linked !== false,
       kind: row.kind || "battle-party",
+      disposition: TOKEN_DISPOSITION.FRIENDLY,
       suffix: "",
       dlceId: row.dlceId ?? null,
       label: row.label ?? null
@@ -429,11 +430,14 @@ export function layoutBattlemapRosterLines({
         name: spec.name,
         actorId: spec.actorId,
         actorLink: spec.linked,
+        disposition:
+          spec.kind === "battle-enemy"
+            ? (spec.disposition ?? TOKEN_DISPOSITION.HOSTILE)
+            : (spec.disposition ?? TOKEN_DISPOSITION.FRIENDLY),
         ...(spec.kind === "battle-enemy"
           ? {
               lockRotation: true,
-              displayName: tokenDisplayHover(),
-              disposition: spec.disposition ?? -1
+              displayName: tokenDisplayHover()
             }
           : {}),
         width: spec.width,
@@ -571,6 +575,7 @@ async function placeNpcsOnScene(scene, npcs, slots) {
         name: actor.name,
         actorId: actor.id,
         actorLink: true,
+        disposition: TOKEN_DISPOSITION.NEUTRAL,
         ...(textureSrc ? { "texture.src": textureSrc } : {}),
         flags: {
           ...(token.flags ?? {}),
@@ -593,6 +598,7 @@ async function placeNpcsOnScene(scene, npcs, slots) {
       name: actor.name,
       actorId: actor.id,
       actorLink: true,
+      disposition: TOKEN_DISPOSITION.NEUTRAL,
       x: spacing * (index + 1),
       y: 80,
       ...(textureSrc ? { texture: { src: textureSrc } } : {}),
@@ -627,7 +633,7 @@ async function placePcsOnScene(scene, pcs, slots) {
       name: actor.name,
       actorId: actor.id,
       actorLink: true,
-      disposition: 1,
+      disposition: TOKEN_DISPOSITION.FRIENDLY,
       ...(textureSrc ? { "texture.src": textureSrc } : {}),
       flags: {
         ...(token.flags ?? {}),
@@ -661,7 +667,7 @@ async function placePcsOnScene(scene, pcs, slots) {
       name: actor.name,
       actorId: actor.id,
       actorLink: true,
-      disposition: 1,
+      disposition: TOKEN_DISPOSITION.FRIENDLY,
       width,
       height,
       x,

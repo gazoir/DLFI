@@ -11,7 +11,8 @@ import {
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
   SETTING_TEMPLATE_LANDING,
-  SETTING_TEMPLATE_LOCATION
+  SETTING_TEMPLATE_LOCATION,
+  TOKEN_DISPOSITION
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import { buildPcActorData } from "./buildPcActor.mjs";
@@ -543,6 +544,8 @@ export async function importSessionPackage(loaded, options = {}) {
         patch["prototypeToken.texture.scaleX"] = Number(pc.tokenScale);
         patch["prototypeToken.texture.scaleY"] = Number(pc.tokenScale);
       }
+      // Re-imports: ensure matched PCs stay Friendly even if a prior stub was Hostile.
+      patch["prototypeToken.disposition"] = TOKEN_DISPOSITION.FRIENDLY;
       if (Object.keys(patch).length) {
         await actor.update(patch);
       }
