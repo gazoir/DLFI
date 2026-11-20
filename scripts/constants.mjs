@@ -27,6 +27,14 @@ export const DEFAULT_IMPORTS_PATH = "dlfi-imports";
 /** World flag namespace for DLFI metadata on Folders / documents. */
 export const FLAG_SCOPE = MODULE_ID;
 
+/** Foundry CONST.TOKEN_DISPOSITIONS — keep numeric so Node selftests work offline. */
+export const TOKEN_DISPOSITION = Object.freeze({
+  SECRET: -2,
+  HOSTILE: -1,
+  NEUTRAL: 0,
+  FRIENDLY: 1
+});
+
 export function setting(key) {
   return game.settings.get(MODULE_ID, key);
 }
