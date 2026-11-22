@@ -1406,6 +1406,52 @@ for (const path of paths) {
   assert(isNotFoundError(new Error("404 Not Found")) && isNotFoundError({ status: 404 }), "404 errors detected");
   assert(!isNotFoundError(new Error("permission denied")), "non-404 errors not treated as missing");
 
+  // V14-style FilePicker: no deletePath and no /filesystem fallback.
+  let fetchCalls = 0;
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async (..._args) => {
+    fetchCalls += 1;
+    return { ok: false, status: 404 };
+  };
+  globalThis.FilePicker = { browse: async () => ({ dirs: [], files: [] }) };
+  assert((await delFile("dlfi-imports/SESSION_014/assets/x.webp")) === false, "V14 without deletePath returns false");
+  assert((await delFile("dlfi-imports/SESSION_014/assets/y.webp")) === false, "second unsupported delete still false");
+  assert(fetchCalls === 0, "deleteDataFile must not POST /filesystem");
+  globalThis.fetch = prevFetch;
+
+  // purgeSessionAssets short-circuits after the first failed delete (no network spam).
+  {
+    const sessions = await import("./sessions.mjs");
+    const tree = {
+      "dlfi-imports": { dirs: ["dlfi-imports/SESSION_099__Name__a"], files: [] },
+      "dlfi-imports/SESSION_099__Name__a": {
+        dirs: [],
+        files: [
+          "dlfi-imports/SESSION_099__Name__a/a.webp",
+          "dlfi-imports/SESSION_099__Name__a/b.webp",
+          "dlfi-imports/SESSION_099__Name__a/c.webp"
+        ]
+      }
+    };
+    let purgeFetchCalls = 0;
+    globalThis.fetch = async (..._args) => {
+      purgeFetchCalls += 1;
+      return { ok: false, status: 404 };
+    };
+    globalThis.FilePicker = {
+      async browse(_source, path) {
+        if (!tree[path]) throw new Error("missing");
+        return tree[path];
+      }
+      // no deletePath → deleteDataFile returns false quietly
+    };
+    const assets = await sessions.purgeSessionAssets("SESSION_099", "dlfi-imports");
+    assert(assets.filesDeleted === 0, "V14 purge deletes nothing without deletePath");
+    assert(assets.filesSkipped === 3, "V14 purge skips remaining files after first failure");
+    assert(purgeFetchCalls === 0, "V14 purge does not call /filesystem");
+    globalThis.fetch = prevFetch;
+  }
+
   const modern = {
     async deletePath() {
       throw new Error("File not found (404)");
@@ -1414,7 +1460,7 @@ for (const path of paths) {
   globalThis.foundry.applications = { apps: { FilePicker: { implementation: modern } } };
   globalThis.FilePicker = undefined;
   assert(getFilePicker() === modern, "FilePicker resolved via foundry.applications.apps.FilePicker.implementation");
-  assert((await delFile("assets/battlemaps/old.webp")) === true, "delete 404 treated as already removed");
+  assert((await delFile("assets/battlemaps/old.webp")) === true, "deletePath 404 treated as already removed");
   delete globalThis.foundry.applications;
 }
 
