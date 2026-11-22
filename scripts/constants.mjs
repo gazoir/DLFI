@@ -27,6 +27,12 @@ export const DEFAULT_IMPORTS_PATH = "dlfi-imports";
 /** World flag namespace for DLFI metadata on Folders / documents. */
 export const FLAG_SCOPE = MODULE_ID;
 
+/**
+ * Shared Actor folder for Player Character stubs (not session-scoped).
+ * All seated PCs created by DLFI live here so they persist across session imports.
+ */
+export const PC_ACTOR_FOLDER_NAME = "Damned Lucky";
+
 /** Foundry CONST.TOKEN_DISPOSITIONS — keep numeric so Node selftests work offline. */
 export const TOKEN_DISPOSITION = Object.freeze({
   SECRET: -2,

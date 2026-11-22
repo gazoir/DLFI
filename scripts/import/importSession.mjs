@@ -2,6 +2,7 @@ import {
   FLAG_SCOPE,
   MODULE_ID,
   notify,
+  PC_ACTOR_FOLDER_NAME,
   sessionKey,
   setSetting,
   SETTING_IMPORTS,
@@ -51,7 +52,8 @@ import {
   finalizeLandingScene,
   finalizeLeftoversScene,
   finalizeLocationScene,
-  isItemPilesActive
+  isItemPilesActive,
+  itemPilesDetectionDebug
 } from "./scenePlacement.mjs";
 import {
   buildMsdSceneSequence,
@@ -63,7 +65,11 @@ import {
   createSceneFromBundledTemplate,
   loadBundledPcActorTemplate
 } from "./defaultTemplates.mjs";
-import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
+import {
+  ensurePcActorFolder,
+  ensureSessionFolders,
+  setExclusiveSceneNavigation
+} from "./folders.mjs";
 import { purgeSessionAssets, purgeSessionDocuments } from "./sessions.mjs";
 import {
   ensureDataFolder,
@@ -187,6 +193,41 @@ export async function importSessionPackage(loaded, options = {}) {
   const { manifest, files } = loaded;
   const importKey = `${manifest.sessionCode}_${String(manifest.exportedAt).replace(/[:.]/g, "-")}`;
   const liveKey = setting(SETTING_LIVE_SESSION);
+  const importStartedAt = Date.now();
+  let lastProgressAt = importStartedAt;
+  let progressStep = 0;
+
+  /**
+   * Step-by-step console progress so long imports do not look hung.
+   * @param {string} label
+   * @param {object|string|null} [detail]
+   */
+  const progress = (label, detail = null) => {
+    progressStep += 1;
+    const now = Date.now();
+    const sinceStartMs = now - importStartedAt;
+    const sinceLastMs = now - lastProgressAt;
+    lastProgressAt = now;
+    const prefix = `${MODULE_ID} | import ${progressStep}: ${label}`;
+    const timing = `(+${(sinceLastMs / 1000).toFixed(1)}s, ${ (sinceStartMs / 1000).toFixed(1)}s total)`;
+    if (detail != null && detail !== "") {
+      console.log(`${prefix} ${timing}`, detail);
+    } else {
+      console.log(`${prefix} ${timing}`);
+    }
+  };
+
+  progress("start", {
+    sessionCode: manifest.sessionCode,
+    displayCode: manifest.displayCode,
+    sessionName: manifest.sessionName,
+    exportedAt: manifest.exportedAt,
+    source: loaded.sourceLabel,
+    fileCount: files?.size ?? 0,
+    documentCount: (manifest.documents ?? []).length,
+    pcCount: (manifest.pcs ?? []).length,
+    partyLevel: manifest.partyLevel ?? null
+  });
 
   if (options.packCurrentLive !== false && liveKey) {
     notify("DLFI: Pack-to-Archive before import is stubbed in 0.1 — continuing with import.", {
@@ -197,6 +238,7 @@ export async function importSessionPackage(loaded, options = {}) {
   const replaceExisting =
     options.replaceExisting ?? setting(SETTING_REPLACE_ON_REIMPORT) !== false;
   if (replaceExisting) {
+    progress("replace previous import (documents + assets)");
     try {
       const removed = await purgeSessionDocuments(manifest.sessionCode);
       const assets = await purgeSessionAssets(
@@ -204,24 +246,26 @@ export async function importSessionPackage(loaded, options = {}) {
         String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports"
       );
       if (removed || assets.dirs.length) {
-        console.log(`${MODULE_ID} | replaced previous import of ${manifest.sessionCode}`, {
-          removed,
-          assets
-        });
+        progress("replaced previous import", { removed, assets });
+      } else {
+        progress("no previous import to replace");
       }
     } catch (error) {
       console.warn(`${MODULE_ID} | could not remove previous import of ${manifest.sessionCode}`, error);
     }
   }
 
+  progress("ensure session folders");
   const { name: folderName, folders } = await ensureSessionFolders(manifest, importKey);
+  progress("ensure PC Actor folder", { name: PC_ACTOR_FOLDER_NAME });
+  const pcActorFolder = await ensurePcActorFolder();
 
   /** @type {Map<string, string>} packagePath -> world data path */
   const uploaded = new Map();
   const importsBase = String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports";
   const packageRoot = packageImportRoot(manifest, loaded.sourceLabel);
   const importsRoot = await ensureDataFolder(`${importsBase}/${packageRoot}`);
-  console.log(`${MODULE_ID} | importing assets into Data/${importsRoot}`);
+  progress("upload assets", { importsRoot });
 
   // Create parent folders from whatever uploadable paths the package contains
   // (assets/** plus top-level Landing Page/** slides from DLCE).
@@ -244,17 +288,24 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   let uploadFailures = 0;
-  for (const [path, bytes] of files) {
-    if (!shouldUploadPackagePath(path)) {
-      continue;
+  let uploadOk = 0;
+  const uploadable = [...files.entries()].filter(([path]) => shouldUploadPackagePath(path));
+  const uploadTotal = uploadable.length;
+  let uploadIndex = 0;
+  for (const [path, bytes] of uploadable) {
+    uploadIndex += 1;
+    if (uploadIndex === 1 || uploadIndex === uploadTotal || uploadIndex % 25 === 0) {
+      progress(`uploading asset ${uploadIndex}/${uploadTotal}`, path);
     }
     const worldPath = await uploadAsset(path, bytes, importsRoot);
     if (worldPath) {
       uploaded.set(path, worldPath);
+      uploadOk += 1;
     } else {
       uploadFailures += 1;
     }
   }
+  progress("assets uploaded", { ok: uploadOk, failed: uploadFailures, total: uploadTotal });
   if (uploadFailures) {
     notify(`DLFI: ${uploadFailures} asset upload(s) failed — check console for paths.`, {
       type: "warning"
@@ -299,6 +350,10 @@ export async function importSessionPackage(loaded, options = {}) {
   /** @type {Array<{ scene: Scene, entry: object, raw: object|null }>} */
   const battlemapMeta = [];
   const sceneSequence = buildMsdSceneSequence(manifest, { readDocument });
+  progress("create location + battlemap scenes", {
+    locations: locations.length,
+    sequenceSteps: sceneSequence.length
+  });
 
   for (const step of sceneSequence) {
     const { kind, entry, order } = step;
@@ -486,6 +541,7 @@ export async function importSessionPackage(loaded, options = {}) {
   const npcRecords = [];
 
   const npcEntries = (manifest.documents ?? []).filter((d) => d.type === "npc");
+  progress("create NPC actors", { count: npcEntries.length });
   const npcRawById = new Map(npcEntries.map((entry) => [entry.id, readDocument(entry.file) ?? {}]));
   // Enemies in combat encounters are unlinked on Actor.prototypeToken (Link Actor Data off).
   const combatEnemyIds = collectCombatEnemyIds(
@@ -541,6 +597,23 @@ export async function importSessionPackage(loaded, options = {}) {
   /** @type {Array<{ name: string, knownAs?: string|null, id?: string|null }>} */
   const pcsMissingDdb = [];
 
+  const manifestPcs = manifest.pcs ?? [];
+  progress("PCs from package", {
+    count: manifestPcs.length,
+    folder: PC_ACTOR_FOLDER_NAME,
+    names: manifestPcs.map((pc) => pc.knownAs || pc.name || pc.id)
+  });
+  if (!manifestPcs.length) {
+    console.warn(
+      `${MODULE_ID} | manifest.pcs is empty — no Player Character stubs will be created. ` +
+        `In DLCE, seat PCs on the active Game, then re-export the Session Package.`
+    );
+    notify(
+      "DLFI: package has 0 seated PCs — seat PCs on the active Game in DLCE and re-export.",
+      { type: "warning" }
+    );
+  }
+
   const pcActorTemplate = await loadBundledPcActorTemplate();
   if (!pcActorTemplate) {
     console.warn(
@@ -548,11 +621,12 @@ export async function importSessionPackage(loaded, options = {}) {
     );
   }
 
-  for (const pc of manifest.pcs ?? []) {
+  for (const pc of manifestPcs) {
     const portrait = pc.portrait ? uploaded.get(pc.portrait) || null : null;
     const token = pc.token ? uploaded.get(pc.token) || null : null;
     let actor = matchExistingPcActor(pc);
     if (actor) {
+      progress(`match existing PC ${pc.knownAs || pc.name || pc.id}`, actor.uuid);
       const patch = buildExistingPcFillPatch(actor, pc, {
         portrait,
         token,
@@ -562,11 +636,17 @@ export async function importSessionPackage(loaded, options = {}) {
         await actor.update(patch);
       }
     } else {
+      progress(`create PC stub ${pc.knownAs || pc.name || pc.id}`, {
+        folder: PC_ACTOR_FOLDER_NAME,
+        ddbUrl: pc.ddbUrl ?? null,
+        portrait: Boolean(portrait),
+        token: Boolean(token)
+      });
       const actorData = buildPcActorData(pc, {
         portrait,
         token,
         tokenScale: pc.tokenScale,
-        folderId: folders.Actor?.id ?? null,
+        folderId: pcActorFolder?.id ?? null,
         importKey,
         template: pcActorTemplate
       });
@@ -639,8 +719,10 @@ export async function importSessionPackage(loaded, options = {}) {
   const itemsByLocation = new Map();
   /** @type {Array<{ name: string, img?: string, uuid: string, dlceId: string }>} */
   const leftoverItems = [];
+  const itemEntries = (manifest.documents ?? []).filter((d) => d.type === "item");
+  progress("create items", { count: itemEntries.length });
   const reverseItemLocations = buildItemLocationsFromLocationLinks(locations, readDocument);
-  for (const entry of (manifest.documents ?? []).filter((d) => d.type === "item")) {
+  for (const entry of itemEntries) {
     const raw = readDocument(entry.file) ?? {};
     const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
     const fields = raw?.fields ?? {};
@@ -706,6 +788,11 @@ export async function importSessionPackage(loaded, options = {}) {
     }))
   );
   const itemPilesActive = isItemPilesActive();
+  progress("Item Piles check", {
+    ...itemPilesDetectionDebug(),
+    active: itemPilesActive,
+    locationItemCount: locationItemsFlat.length
+  });
   if (locationItemsFlat.length && !itemPilesActive) {
     await alertItemPilesMissing({
       scene: { name: `${folderName} (location scenes)` },
@@ -714,7 +801,15 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   // Bind NPCs into location template slots, fill descriptions, place item piles
+  progress("finalize location scenes", {
+    count: locationSceneMeta.size,
+    placeItemPiles: itemPilesActive
+  });
   for (const meta of locationSceneMeta.values()) {
+    progress(`finalize location ${meta.scene?.name ?? "?"}`, {
+      npcs: meta.npcs?.length ?? 0,
+      items: meta.items?.length ?? 0
+    });
     await finalizeLocationScene(meta.scene, {
       description: meta.description,
       poisText: meta.poisText,
@@ -733,7 +828,6 @@ export async function importSessionPackage(loaded, options = {}) {
     raw: row.raw
   }));
   const partyForBattlemaps = [];
-  const manifestPcs = manifest.pcs ?? [];
   for (const { actor, pc } of sessionPcs) {
     if (!actor) {
       console.warn(
@@ -786,6 +880,10 @@ export async function importSessionPackage(loaded, options = {}) {
       );
     }
   }
+  progress("finalize battlemaps", {
+    count: battlemapMeta.length,
+    partyTokens: partyForBattlemaps.length
+  });
   for (const meta of battlemapMeta) {
     const collected = collectChallengeEnemies(meta.entry, meta.raw, {
       npcDocuments: npcDocumentsForLinks
@@ -821,6 +919,7 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   if (landingScene) {
+    progress("finalize Landing", { seatedPcs: sessionPcs.length });
     await finalizeLandingScene(landingScene, sessionPcs);
   }
 
@@ -829,16 +928,18 @@ export async function importSessionPackage(loaded, options = {}) {
     .filter((row) => !placedNpcIds.has(row.entry.id))
     .map((row) => ({ actor: row.actor, entry: row.entry }));
   if (leftoversScene) {
+    progress("finalize Leftovers", {
+      npcs: leftoverNpcs.length,
+      items: leftoverItems.length
+    });
     await finalizeLeftoversScene(leftoversScene, {
       npcs: leftoverNpcs,
       itemNotes: leftoverItems
     });
-    console.log(
-      `${MODULE_ID} | Leftovers: ${leftoverNpcs.length} NPCs, ${leftoverItems.length} items`
-    );
   }
 
   // --- Items-by-location Journal ---
+  progress("create journals (items-by-location + MSD)");
   const itemPages = [];
   for (const entry of locations) {
     const uuids = itemsByLocation.get(entry.id) ?? [];
@@ -897,6 +998,18 @@ export async function importSessionPackage(loaded, options = {}) {
       missingDdb: pcsMissingDdb
     });
   }
+
+  progress("done", {
+    folderName,
+    locations: locations.length,
+    battlemaps: battlemapMeta.length,
+    npcs: npcEntries.length,
+    items: itemEntries.length,
+    pcsMatchedOrCreated: sessionPcs.length,
+    pcStubsCreated: createdPcStubs.length,
+    pcFolder: PC_ACTOR_FOLDER_NAME,
+    landingId: landing?.id ?? landingScene?.id ?? null
+  });
 
   notify(
     `Imported ${folderName}: ${locations.length} locations, ${battlemapMeta.length} battlemaps, actors/items created, Landing active.`,

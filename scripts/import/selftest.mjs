@@ -91,6 +91,9 @@ const {
   compareItemsForPilePlacement,
   ITEM_PILE_COLUMNS,
   ITEM_PILE_SCALE,
+  ITEM_PILES_MODULE_ID,
+  ITEM_PILES_MODULE_ID_LEGACY,
+  isItemPilesActive,
   itemPileSortKey,
   layoutBattlemapRosterLines,
   layoutLocationItemPilePositions,
@@ -98,6 +101,7 @@ const {
   selectLandingPcSlots,
   tokenPlacementSpec
 } = await import("./scenePlacement.mjs");
+const { PC_ACTOR_FOLDER_NAME } = await import("../constants.mjs");
 const {
   buildMsdSceneSequence,
   formatSceneDmName,
@@ -1558,6 +1562,33 @@ for (const path of paths) {
   assert(getFilePicker() === modern, "FilePicker resolved via foundry.applications.apps.FilePicker.implementation");
   assert((await delFile("assets/battlemaps/old.webp")) === true, "deletePath 404 treated as already removed");
   delete globalThis.foundry.applications;
+}
+
+// Item Piles module id + Damned Lucky PC folder
+{
+  assert(ITEM_PILES_MODULE_ID === "item-piles", "Item Piles module id is hyphenated");
+  assert(ITEM_PILES_MODULE_ID_LEGACY === "itempiles", "legacy Item Piles id retained");
+  assert(PC_ACTOR_FOLDER_NAME === "Damned Lucky", "PC stubs use Damned Lucky folder");
+  globalThis.game = {
+    modules: {
+      get: (id) => (id === "item-piles" ? { active: true } : undefined)
+    }
+  };
+  assert(isItemPilesActive() === true, "detects item-piles active");
+  globalThis.game = {
+    modules: { get: () => undefined },
+    itempiles: { API: { createItemPile: async () => null } }
+  };
+  assert(isItemPilesActive() === true, "detects Item Piles via game.itempiles.API");
+  globalThis.game = {
+    modules: {
+      get: (id) => (id === "itempiles" ? { active: true } : undefined)
+    }
+  };
+  assert(isItemPilesActive() === true, "detects legacy itempiles id");
+  globalThis.game = { modules: { get: () => undefined } };
+  assert(isItemPilesActive() === false, "inactive when module and API absent");
+  delete globalThis.game;
 }
 
 // Location Item Pile sort order + layout (Expo template geometry)
