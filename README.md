@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.31`)
+## Status (`0.1.32`)
 
 Working in this slice:
 
@@ -37,6 +37,7 @@ Working in this slice:
 - **0.1.24:** PC tokens Friendly; location NPC tokens Neutral (combat enemies stay Hostile)
 - **0.1.25:** Melee attacks pick DEX when to-hit matches DEX+prof (fixes Imp Sting +10); warn when to-hit is wild for CR
 - **0.1.26:** Battlemap PC tokens use Known as + Hovered by Anyone (default prototype too)
+- **0.1.32:** Remove Expo Item 1–N placeholders from location scenes; Item Pile actors live under `{Session}/Item Piles` with the package item embedded + item portrait; Token Vision disabled on pile tokens
 - **0.1.31:** Fix Item Piles detection (`item-piles` module id); PC stubs go in shared Actor folder **Damned Lucky**; step-by-step import console progress with timings; warn when `manifest.pcs` is empty
 - **0.1.30:** PC stubs clone bundled `templates/actors/player-character.json` (name / DDB flags / portrait / Known-as token); fill-only updates for existing PCs; DialogV2 when created stubs lack a D&D Beyond URL
 - **0.1.29:** Location scenes place related Items as Item Piles in the lower-right padding (Expo template layout); bidirectional item↔location links; sort by plot/magic/consumable/cash/gold/mundane; DialogV2 when Item Piles is inactive

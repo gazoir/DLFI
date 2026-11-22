@@ -91,9 +91,11 @@ const {
   compareItemsForPilePlacement,
   ITEM_PILE_COLUMNS,
   ITEM_PILE_SCALE,
+  ITEM_PILE_PLACEHOLDER_NAME_RE,
   ITEM_PILES_MODULE_ID,
   ITEM_PILES_MODULE_ID_LEGACY,
   isItemPilesActive,
+  isLocationItemPilePlaceholderToken,
   itemPileSortKey,
   layoutBattlemapRosterLines,
   layoutLocationItemPilePositions,
@@ -101,7 +103,7 @@ const {
   selectLandingPcSlots,
   tokenPlacementSpec
 } = await import("./scenePlacement.mjs");
-const { PC_ACTOR_FOLDER_NAME } = await import("../constants.mjs");
+const { ITEM_PILES_FOLDER_NAME, PC_ACTOR_FOLDER_NAME } = await import("../constants.mjs");
 const {
   buildMsdSceneSequence,
   formatSceneDmName,
@@ -1569,6 +1571,25 @@ for (const path of paths) {
   assert(ITEM_PILES_MODULE_ID === "item-piles", "Item Piles module id is hyphenated");
   assert(ITEM_PILES_MODULE_ID_LEGACY === "itempiles", "legacy Item Piles id retained");
   assert(PC_ACTOR_FOLDER_NAME === "Damned Lucky", "PC stubs use Damned Lucky folder");
+  assert(ITEM_PILES_FOLDER_NAME === "Item Piles", "session Item Piles subfolder name");
+  assert(ITEM_PILE_PLACEHOLDER_NAME_RE.test("Item 1"), "Item 1 is a placeholder name");
+  assert(ITEM_PILE_PLACEHOLDER_NAME_RE.test("Item 5"), "Item 5 is a placeholder name");
+  assert(!ITEM_PILE_PLACEHOLDER_NAME_RE.test("Sentinel Shield"), "real item name is not placeholder");
+  assert(
+    isLocationItemPilePlaceholderToken({ name: "Item 3", flags: {} }),
+    "Item 3 token is cleared as placeholder"
+  );
+  assert(
+    isLocationItemPilePlaceholderToken({
+      name: "Bag",
+      flags: { "item-piles": { data: { type: "pile" } } }
+    }),
+    "item-piles flagged token is cleared"
+  );
+  assert(
+    !isLocationItemPilePlaceholderToken({ name: "1A1", flags: {} }),
+    "NPC slot is not an item-pile placeholder"
+  );
   globalThis.game = {
     modules: {
       get: (id) => (id === "item-piles" ? { active: true } : undefined)
@@ -1657,6 +1678,8 @@ for (const path of paths) {
   assert(token.disposition === 1, "pile disposition friendly");
   assert(token.width === 1 && token.height === 1, "pile footprint 1×1");
   assert(token.texture.scaleX === ITEM_PILE_SCALE && token.texture.fit === "contain", "pile scale/fit");
+  assert(token.vision === false, "pile token vision disabled");
+  assert(token.sight?.enabled === false, "pile token sight.enabled false");
   assert(token.flags.itempiles == null, "item piles flag uses hyphenated scope");
   assert(token.flags["item-piles"]?.data?.type === "pile", "item-piles data.type=pile");
   assert(token.flags["item-piles"]?.data?.singleItemScale === 0.75, "singleItemScale 0.75");

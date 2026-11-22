@@ -37,6 +37,41 @@ export async function ensurePcActorFolder() {
 }
 
 /**
+ * Ensure a child Folder under an existing parent (same document type).
+ * @param {Folder} parent
+ * @param {string} name
+ * @param {object} [flags]
+ * @returns {Promise<Folder|null>}
+ */
+export async function ensureChildFolder(parent, name, flags = {}) {
+  if (!parent?.id || !parent?.type) {
+    return null;
+  }
+  const label = String(name || "").trim();
+  if (!label) {
+    return null;
+  }
+  const existing = game.folders.find(
+    (folder) =>
+      folder.type === parent.type &&
+      folder.name === label &&
+      (folder.folder?.id ?? folder.folder ?? null) === parent.id
+  );
+  if (existing) {
+    if (Object.keys(flags).length) {
+      await existing.update({ flags: { [FLAG_SCOPE]: flags } });
+    }
+    return existing;
+  }
+  return Folder.create({
+    name: label,
+    type: parent.type,
+    folder: parent.id,
+    flags: { [FLAG_SCOPE]: flags }
+  });
+}
+
+/**
  * Create the standard folder set for one imported session.
  * @param {object} manifest
  * @param {string} importKey

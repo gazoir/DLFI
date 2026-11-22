@@ -1,5 +1,6 @@
 import {
   FLAG_SCOPE,
+  ITEM_PILES_FOLDER_NAME,
   MODULE_ID,
   notify,
   PC_ACTOR_FOLDER_NAME,
@@ -66,6 +67,7 @@ import {
   loadBundledPcActorTemplate
 } from "./defaultTemplates.mjs";
 import {
+  ensureChildFolder,
   ensurePcActorFolder,
   ensureSessionFolders,
   setExclusiveSceneNavigation
@@ -256,9 +258,20 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   progress("ensure session folders");
-  const { name: folderName, folders } = await ensureSessionFolders(manifest, importKey);
+  const { name: folderName, folders, meta: sessionFolderMeta } = await ensureSessionFolders(
+    manifest,
+    importKey
+  );
   progress("ensure PC Actor folder", { name: PC_ACTOR_FOLDER_NAME });
   const pcActorFolder = await ensurePcActorFolder();
+  progress("ensure Item Piles Actor folder", {
+    parent: folderName,
+    name: ITEM_PILES_FOLDER_NAME
+  });
+  const itemPilesFolder = await ensureChildFolder(folders.Actor, ITEM_PILES_FOLDER_NAME, {
+    ...sessionFolderMeta,
+    kind: "item-piles"
+  });
 
   /** @type {Map<string, string>} packagePath -> world data path */
   const uploaded = new Map();
@@ -817,7 +830,9 @@ export async function importSessionPackage(loaded, options = {}) {
       npcs: meta.npcs,
       // Skip per-scene dialogs when we already alerted above.
       items: itemPilesActive ? meta.items : [],
-      skipItemPiles: !itemPilesActive
+      skipItemPiles: !itemPilesActive,
+      itemPilesFolderId: itemPilesFolder?.id ?? null,
+      sessionFolderName: folderName
     });
   }
 
