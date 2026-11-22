@@ -21,8 +21,13 @@ import { pickTokenTexture, tokenDisplayAlways, tokenDisplayHover } from "./token
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
 
-/** Item Piles Foundry module id. */
-export const ITEM_PILES_MODULE_ID = "itempiles";
+/**
+ * Item Piles Foundry module id (manifest `id` is hyphenated since v3).
+ * Legacy installs / docs sometimes used `itempiles` without a hyphen.
+ */
+export const ITEM_PILES_MODULE_ID = "item-piles";
+/** Older module id — still accepted when detecting an active install. */
+export const ITEM_PILES_MODULE_ID_LEGACY = "itempiles";
 /** Item Piles flag namespace on tokens/actors. */
 export const ITEM_PILES_FLAG_SCOPE = "item-piles";
 /** Columns in the Expo template Item 1–5 row. */
@@ -229,10 +234,36 @@ export function listDlfiItemPileTokens(scene) {
 }
 
 /**
+ * True when Item Piles is enabled for this world.
+ * Prefers module id `item-piles`; also accepts legacy `itempiles` and a live API.
  * @returns {boolean}
  */
 export function isItemPilesActive() {
-  return Boolean(globalThis.game?.modules?.get?.(ITEM_PILES_MODULE_ID)?.active);
+  const modules = globalThis.game?.modules;
+  const byId =
+    Boolean(modules?.get?.(ITEM_PILES_MODULE_ID)?.active) ||
+    Boolean(modules?.get?.(ITEM_PILES_MODULE_ID_LEGACY)?.active);
+  const api = Boolean(globalThis.game?.itempiles?.API);
+  return byId || api;
+}
+
+/**
+ * Debug snapshot for console when Item Piles detection fails.
+ * @returns {object}
+ */
+export function itemPilesDetectionDebug() {
+  const modules = globalThis.game?.modules;
+  const primary = modules?.get?.(ITEM_PILES_MODULE_ID);
+  const legacy = modules?.get?.(ITEM_PILES_MODULE_ID_LEGACY);
+  return {
+    expectedModuleId: ITEM_PILES_MODULE_ID,
+    legacyModuleId: ITEM_PILES_MODULE_ID_LEGACY,
+    primaryActive: Boolean(primary?.active),
+    legacyActive: Boolean(legacy?.active),
+    apiPresent: Boolean(globalThis.game?.itempiles?.API),
+    createItemPile:
+      typeof globalThis.game?.itempiles?.API?.createItemPile === "function"
+  };
 }
 
 /**
@@ -249,7 +280,7 @@ export async function alertItemPilesMissing({ scene = null, items = [] } = {}) {
     dlceId: item?.dlceId ?? item?.flags?.[FLAG_SCOPE]?.dlceId ?? null
   }));
   console.warn(`${MODULE_ID} | Item Piles module inactive — skipping location pile placement`, {
-    expectedModuleId: ITEM_PILES_MODULE_ID,
+    ...itemPilesDetectionDebug(),
     sceneName,
     sceneId,
     itemCount: rows.length,

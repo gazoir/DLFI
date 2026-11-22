@@ -1,4 +1,4 @@
-import { FLAG_SCOPE, sessionFolderName } from "../constants.mjs";
+import { FLAG_SCOPE, PC_ACTOR_FOLDER_NAME, sessionFolderName } from "../constants.mjs";
 
 /**
  * Ensure a root Folder of the given document type exists.
@@ -21,6 +21,18 @@ export async function ensureFolder(type, name, flags = {}) {
     type,
     folder: null,
     flags: { [FLAG_SCOPE]: flags }
+  });
+}
+
+/**
+ * Shared Actor folder for Player Characters (`Damned Lucky`).
+ * Not tied to a session import — survives replace/delete of session folders.
+ * @returns {Promise<Folder>}
+ */
+export async function ensurePcActorFolder() {
+  return ensureFolder("Actor", PC_ACTOR_FOLDER_NAME, {
+    kind: "pc-library",
+    name: PC_ACTOR_FOLDER_NAME
   });
 }
 
