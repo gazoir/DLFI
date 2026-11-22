@@ -11,13 +11,431 @@
  *   Session Notes… — plus legacy Description 1–3 (Description 4 is unused leftover)
  * - Battlemaps: ignore A#/P# placeholders; create enemy + party roster lines in
  *   the bottom canvas padding (footprint-spaced, flush to canvas bottom)
+ * - Location Item Piles: lower-right outside the map art (bottom padding, 5 cols
+ *   right-aligned to the map edge), matching Expo Scene Template Item 1–5
  */
 
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
-import { pickTokenTexture, tokenDisplayHover } from "./tokenArt.mjs";
+import { pickTokenTexture, tokenDisplayAlways, tokenDisplayHover } from "./tokenArt.mjs";
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
+
+/** Item Piles Foundry module id. */
+export const ITEM_PILES_MODULE_ID = "itempiles";
+/** Item Piles flag namespace on tokens/actors. */
+export const ITEM_PILES_FLAG_SCOPE = "item-piles";
+/** Columns in the Expo template Item 1–5 row. */
+export const ITEM_PILE_COLUMNS = 5;
+/** Token / single-item scale from the Expo template. */
+export const ITEM_PILE_SCALE = 0.75;
+/** flags.item-piles.version matching the Expo template. */
+export const ITEM_PILES_FLAG_VERSION = "3.3.4";
+
+/**
+ * Item Piles `data` flags from the Expo Scene Template (Item 1–5).
+ * @type {Readonly<{
+ *   enabled: boolean,
+ *   type: string,
+ *   deleteWhenEmpty: boolean,
+ *   displayOne: boolean,
+ *   showItemName: boolean,
+ *   overrideSingleItemScale: boolean,
+ *   singleItemScale: number
+ * }>}
+ */
+export const ITEM_PILE_DATA_FLAGS = Object.freeze({
+  enabled: true,
+  type: "pile",
+  deleteWhenEmpty: true,
+  displayOne: true,
+  showItemName: true,
+  overrideSingleItemScale: true,
+  singleItemScale: ITEM_PILE_SCALE
+});
+
+/**
+ * Sort priority for location Item Pile placement.
+ *
+ * Mapping (flags.dlfi.subtype / manifest subtype → priority):
+ * | Priority | Group                         | Subtype keys                          |
+ * |----------|--------------------------------|---------------------------------------|
+ * | 1        | Plot items                     | plot, plot_item                       |
+ * | 2        | Permanent magical items        | magic, magical, magic_item, permanent |
+ * | 3        | Consumables                    | consumable, potion, scroll            |
+ * | 4        | Cash loot                      | cash_loot, cash                       |
+ * | 5        | Gold                           | gold_pieces, gold                     |
+ * | 6        | Mundane items                  | mundane, loot, equipment, gear        |
+ * | 7        | Unknown / unrecognised         | (anything else — after mundane)       |
+ *
+ * @param {string|null|undefined} subtype
+ * @returns {number}
+ */
+export function itemPileSortKey(subtype) {
+  const key = String(subtype ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  if (!key || key === "plot" || key === "plot_item") return 1;
+  if (
+    key === "magic" ||
+    key === "magical" ||
+    key === "magic_item" ||
+    key === "permanent" ||
+    key === "permanent_magic" ||
+    key === "permanent_magical"
+  ) {
+    return 2;
+  }
+  if (key === "consumable" || key === "consumables" || key === "potion" || key === "scroll") {
+    return 3;
+  }
+  if (key === "cash_loot" || key === "cash" || key === "cashloot") return 4;
+  if (key === "gold_pieces" || key === "gold" || key === "gp") return 5;
+  if (key === "mundane" || key === "loot" || key === "equipment" || key === "gear") return 6;
+  // Unknown subtypes sort after mundane so they stay visible but do not jump groups.
+  return 7;
+}
+
+/**
+ * Sort items for location piles: subtype group, then alphabetical name.
+ * @param {{ name?: string, subtype?: string, flags?: object }} a
+ * @param {{ name?: string, subtype?: string, flags?: object }} b
+ */
+export function compareItemsForPilePlacement(a, b) {
+  const subtypeOf = (row) =>
+    row?.subtype ??
+    row?.flags?.[FLAG_SCOPE]?.subtype ??
+    row?.item?.flags?.[FLAG_SCOPE]?.subtype ??
+    "";
+  const nameOf = (row) =>
+    String(row?.name ?? row?.item?.name ?? "").trim() || "";
+  const ka = itemPileSortKey(subtypeOf(a));
+  const kb = itemPileSortKey(subtypeOf(b));
+  if (ka !== kb) return ka - kb;
+  return nameOf(a).localeCompare(nameOf(b), undefined, { sensitivity: "base" });
+}
+
+/**
+ * Lower-right Item Pile positions outside the map art (bottom padding).
+ * Reference: 1920×1080, padding 0.25, grid 120 → first row y = mapBottom,
+ * x starts at mapRight − 5×grid, step = grid, 5 per row then y += grid.
+ *
+ * @param {{
+ *   metrics: ReturnType<typeof sceneCanvasMetrics>,
+ *   grid?: number,
+ *   count: number,
+ *   columns?: number
+ * }} opts
+ * @returns {Array<{ x: number, y: number, col: number, row: number }>}
+ */
+export function layoutLocationItemPilePositions({
+  metrics,
+  grid,
+  count,
+  columns = ITEM_PILE_COLUMNS
+} = {}) {
+  const n = Math.max(0, Math.floor(Number(count) || 0));
+  const cols = Math.max(1, Math.floor(Number(columns) || ITEM_PILE_COLUMNS));
+  const g = Math.max(1, Number(grid ?? metrics?.gridSize ?? 100) || 100);
+  const sceneX = Number(metrics?.sceneX ?? 0) || 0;
+  const sceneWidth = Number(metrics?.sceneWidth ?? metrics?.width ?? 0) || 0;
+  const mapRight = sceneX + sceneWidth;
+  const yStart =
+    metrics?.mapBottom != null
+      ? Number(metrics.mapBottom) || 0
+      : (Number(metrics?.sceneY ?? 0) || 0) +
+        (Number(metrics?.sceneHeight ?? metrics?.height ?? 0) || 0);
+  const xStart = mapRight - cols * g;
+  /** @type {Array<{ x: number, y: number, col: number, row: number }>} */
+  const positions = [];
+  for (let i = 0; i < n; i += 1) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    positions.push({
+      x: Math.round(xStart + col * g),
+      y: Math.round(yStart + row * g),
+      col,
+      row
+    });
+  }
+  return positions;
+}
+
+/**
+ * Token create payload shaped like the Expo template Item piles.
+ * Used when falling back from the Item Piles API.
+ *
+ * @param {{
+ *   name: string,
+ *   x: number,
+ *   y: number,
+ *   img?: string|null,
+ *   itemUuid?: string|null,
+ *   dlceId?: string|null,
+ *   actorId?: string|null
+ * }} opts
+ */
+export function buildItemPileTokenData({
+  name,
+  x,
+  y,
+  img = null,
+  itemUuid = null,
+  dlceId = null,
+  actorId = null
+} = {}) {
+  const texture = {
+    src: img || "icons/svg/item-bag.svg",
+    scaleX: ITEM_PILE_SCALE,
+    scaleY: ITEM_PILE_SCALE,
+    fit: "contain"
+  };
+  return {
+    name: String(name || "Item").trim() || "Item",
+    ...(actorId ? { actorId, actorLink: false } : {}),
+    disposition: TOKEN_DISPOSITION.FRIENDLY,
+    displayName: tokenDisplayAlways(),
+    width: 1,
+    height: 1,
+    x: Math.round(Number(x) || 0),
+    y: Math.round(Number(y) || 0),
+    texture,
+    flags: {
+      [ITEM_PILES_FLAG_SCOPE]: {
+        version: ITEM_PILES_FLAG_VERSION,
+        data: { ...ITEM_PILE_DATA_FLAGS }
+      },
+      [FLAG_SCOPE]: {
+        kind: "item-pile",
+        itemUuid: itemUuid ?? null,
+        dlceId: dlceId ?? null
+      }
+    }
+  };
+}
+
+/**
+ * @param {Scene} scene
+ * @returns {object[]}
+ */
+export function listDlfiItemPileTokens(scene) {
+  return [...(scene?.tokens?.contents ?? scene?.tokens ?? [])].filter((token) => {
+    const kind = token?.flags?.[FLAG_SCOPE]?.kind;
+    if (kind === "item-pile") return true;
+    // Legacy / API-created piles we tagged only via item uuid on prior runs.
+    return Boolean(token?.flags?.[FLAG_SCOPE]?.itemPile);
+  });
+}
+
+/**
+ * @returns {boolean}
+ */
+export function isItemPilesActive() {
+  return Boolean(globalThis.game?.modules?.get?.(ITEM_PILES_MODULE_ID)?.active);
+}
+
+/**
+ * Modal + console debug when Item Piles is required but inactive.
+ * @param {{ scene?: { name?: string, id?: string }|null, items?: Array<{ name?: string, id?: string, uuid?: string, dlceId?: string }> }} opts
+ */
+export async function alertItemPilesMissing({ scene = null, items = [] } = {}) {
+  const sceneName = scene?.name ?? "(unknown scene)";
+  const sceneId = scene?.id ?? null;
+  const rows = (items ?? []).map((item) => ({
+    name: item?.name ?? item?.item?.name ?? "(unnamed)",
+    id: item?.id ?? item?.item?.id ?? null,
+    uuid: item?.uuid ?? item?.item?.uuid ?? null,
+    dlceId: item?.dlceId ?? item?.flags?.[FLAG_SCOPE]?.dlceId ?? null
+  }));
+  console.warn(`${MODULE_ID} | Item Piles module inactive — skipping location pile placement`, {
+    expectedModuleId: ITEM_PILES_MODULE_ID,
+    sceneName,
+    sceneId,
+    itemCount: rows.length,
+    items: rows
+  });
+
+  const listHtml = rows.length
+    ? `<ul>${rows
+        .map(
+          (row) =>
+            `<li><code>${escapeHtmlLite(row.name)}</code>` +
+            (row.dlceId ? ` <span>(${escapeHtmlLite(row.dlceId)})</span>` : "") +
+            `</li>`
+        )
+        .join("")}</ul>`
+    : "<p><em>No items listed.</em></p>";
+  const content =
+    `<p>The <strong>Item Piles</strong> module (<code>${ITEM_PILES_MODULE_ID}</code>) ` +
+    `is not active. DLFI will not place item piles on <strong>${escapeHtmlLite(sceneName)}</strong>.</p>` +
+    `<p>Enable Item Piles and re-import the session to place these items:</p>${listHtml}`;
+
+  const DialogV2 = globalThis.foundry?.applications?.api?.DialogV2;
+  if (DialogV2?.prompt) {
+    await DialogV2.prompt({
+      window: { title: "Item Piles required" },
+      content,
+      ok: { label: "OK" }
+    });
+    return;
+  }
+  if (typeof globalThis.Dialog?.prompt === "function") {
+    await globalThis.Dialog.prompt({
+      title: "Item Piles required",
+      content,
+      label: "OK",
+      callback: () => undefined
+    });
+    return;
+  }
+  // Last resort: notification only (still no silent token fallback).
+  console.warn(`${MODULE_ID} | ${content.replace(/<[^>]+>/g, " ")}`);
+}
+
+function escapeHtmlLite(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Clear prior DLFI item-pile tokens and place one pile per related Item.
+ * Prefers `game.itempiles.API.createItemPile`; falls back to Token create with
+ * Item Piles flags when the API is missing but the module is active.
+ *
+ * @param {Scene} scene
+ * @param {Array<{ item: Item, name?: string, subtype?: string, dlceId?: string|null }>} items
+ */
+export async function placeLocationItemPiles(scene, items = []) {
+  if (!scene) return;
+
+  const prior = listDlfiItemPileTokens(scene);
+  if (prior.length) {
+    await scene.deleteEmbeddedDocuments(
+      "Token",
+      prior.map((t) => t.id).filter(Boolean)
+    );
+    console.log(
+      `${MODULE_ID} | ${scene.name}: cleared ${prior.length} prior DLFI item-pile token(s)`
+    );
+  }
+
+  const rows = [...(items ?? [])].filter((row) => row?.item || row?.uuid);
+  if (!rows.length) {
+    return;
+  }
+
+  if (!isItemPilesActive()) {
+    await alertItemPilesMissing({ scene, items: rows });
+    return;
+  }
+
+  const sorted = [...rows].sort(compareItemsForPilePlacement);
+  const metrics = sceneCanvasMetrics(scene);
+  const grid = Math.max(1, Number(scene.grid?.size ?? metrics.gridSize ?? 100) || 100);
+  const positions = layoutLocationItemPilePositions({
+    metrics,
+    grid,
+    count: sorted.length,
+    columns: ITEM_PILE_COLUMNS
+  });
+
+  const api = globalThis.game?.itempiles?.API;
+  let placed = 0;
+  /** @type {object[]} */
+  const fallbackTokens = [];
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    const row = sorted[i];
+    const item = row.item ?? null;
+    const name = String(row.name || item?.name || "Item").trim() || "Item";
+    const pos = positions[i];
+    const img = item?.img || row.img || null;
+    const dlceId =
+      row.dlceId ?? item?.flags?.[FLAG_SCOPE]?.dlceId ?? null;
+    const itemUuid = item?.uuid ?? row.uuid ?? null;
+
+    if (typeof api?.createItemPile === "function") {
+      try {
+        const result = await api.createItemPile({
+          position: { x: pos.x, y: pos.y },
+          sceneId: scene.id,
+          createActor: true,
+          items: item ? [item] : [],
+          itemPileFlags: { ...ITEM_PILE_DATA_FLAGS },
+          actorOverrides: { name },
+          tokenOverrides: {
+            name,
+            disposition: TOKEN_DISPOSITION.FRIENDLY,
+            displayName: tokenDisplayAlways(),
+            width: 1,
+            height: 1,
+            texture: {
+              ...(img ? { src: img } : {}),
+              scaleX: ITEM_PILE_SCALE,
+              scaleY: ITEM_PILE_SCALE,
+              fit: "contain"
+            },
+            flags: {
+              [FLAG_SCOPE]: {
+                kind: "item-pile",
+                itemUuid,
+                dlceId
+              }
+            }
+          }
+        });
+        // Tag the created token if the API ignored our flags merge.
+        const tokenUuid = result?.tokenUuid ?? result?.token?.uuid ?? null;
+        if (tokenUuid && globalThis.fromUuid) {
+          const tokenDoc = await globalThis.fromUuid(tokenUuid);
+          if (tokenDoc?.update) {
+            await tokenDoc.update({
+              [`flags.${FLAG_SCOPE}.kind`]: "item-pile",
+              [`flags.${FLAG_SCOPE}.itemUuid`]: itemUuid,
+              [`flags.${FLAG_SCOPE}.dlceId`]: dlceId
+            });
+          }
+        }
+        placed += 1;
+        continue;
+      } catch (error) {
+        console.warn(
+          `${MODULE_ID} | ${scene.name}: createItemPile failed for ${name}; falling back to Token create`,
+          error
+        );
+      }
+    }
+
+    fallbackTokens.push(
+      buildItemPileTokenData({
+        name,
+        x: pos.x,
+        y: pos.y,
+        img,
+        itemUuid,
+        dlceId
+      })
+    );
+  }
+
+  if (fallbackTokens.length) {
+    await scene.createEmbeddedDocuments("Token", fallbackTokens);
+    placed += fallbackTokens.length;
+    console.warn(
+      `${MODULE_ID} | ${scene.name}: placed ${fallbackTokens.length} item-pile token(s) without API ` +
+        `(flags only — open Item Piles on each if interaction is missing)`
+    );
+  }
+
+  console.log(
+    `${MODULE_ID} | ${scene.name}: placed ${placed}/${sorted.length} location item pile(s) ` +
+      `(grid=${grid}, mapBottom=${metrics.mapBottom}, cols=${ITEM_PILE_COLUMNS})`
+  );
+}
 
 const CREATE_LAYOUT = {
   description: { x: 100, y: 100 },
@@ -103,7 +521,14 @@ export function classifyLocationFieldDrawings(drawings) {
 
 export async function finalizeLocationScene(
   scene,
-  { description = "", poisText = "", sessionNotes = "", npcs = [] } = {}
+  {
+    description = "",
+    poisText = "",
+    sessionNotes = "",
+    npcs = [],
+    items = [],
+    skipItemPiles = false
+  } = {}
 ) {
   if (!scene) return;
   const npcSlots = listNpcSlots(scene);
@@ -146,6 +571,20 @@ export async function finalizeLocationScene(
   deleteTokenIds.push(...listPcSlots(scene).map((t) => t.id));
 
   await deleteEmbedded(scene, deleteDrawingIds, deleteTokenIds);
+
+  // Item piles in lower-right padding (requires Item Piles module when items exist).
+  if (!skipItemPiles) {
+    await placeLocationItemPiles(scene, items);
+  } else {
+    // Module missing (caller already alerted): clear stale piles, never place fakes.
+    const prior = listDlfiItemPileTokens(scene);
+    if (prior.length) {
+      await scene.deleteEmbeddedDocuments(
+        "Token",
+        prior.map((t) => t.id).filter(Boolean)
+      );
+    }
+  }
 }
 
 export async function finalizeLandingScene(scene, pcs = []) {

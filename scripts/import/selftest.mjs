@@ -72,8 +72,10 @@ const {
 } = await import("./damageFormula.mjs");
 const {
   buildChallengeHostLocations,
+  buildItemLocationsFromLocationLinks,
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
+  collectItemLocationIds,
   formatPoisBulletList,
   locationDescriptionText,
   locationPois,
@@ -83,9 +85,15 @@ const {
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
 } = await import("./packageLinks.mjs");
 const {
+  buildItemPileTokenData,
   classifyLocationFieldDrawings,
   classifyLocationFieldLabel,
+  compareItemsForPilePlacement,
+  ITEM_PILE_COLUMNS,
+  ITEM_PILE_SCALE,
+  itemPileSortKey,
   layoutBattlemapRosterLines,
+  layoutLocationItemPilePositions,
   sceneCanvasMetrics,
   selectLandingPcSlots,
   tokenPlacementSpec
@@ -1462,6 +1470,121 @@ for (const path of paths) {
   assert(getFilePicker() === modern, "FilePicker resolved via foundry.applications.apps.FilePicker.implementation");
   assert((await delFile("assets/battlemaps/old.webp")) === true, "deletePath 404 treated as already removed");
   delete globalThis.foundry.applications;
+}
+
+// Location Item Pile sort order + layout (Expo template geometry)
+{
+  assert(itemPileSortKey("plot") === 1, "plot sort key");
+  assert(itemPileSortKey("magic") === 2, "magic sort key");
+  assert(itemPileSortKey("consumable") === 3, "consumable sort key");
+  assert(itemPileSortKey("cash_loot") === 4, "cash_loot sort key");
+  assert(itemPileSortKey("gold_pieces") === 5, "gold_pieces sort key");
+  assert(itemPileSortKey("mundane") === 6, "mundane sort key");
+  assert(itemPileSortKey("weird_unknown") === 7, "unknown sorts after mundane");
+  assert(itemPileSortKey("PLOT") === 1, "subtype case-insensitive");
+
+  const shuffled = [
+    { name: "Z Coin", subtype: "gold_pieces" },
+    { name: "Alpha Ring", subtype: "magic" },
+    { name: "Beta Potion", subtype: "consumable" },
+    { name: "Quest Letter", subtype: "plot" },
+    { name: "Loose Gems", subtype: "cash_loot" },
+    { name: "Rope", subtype: "mundane" },
+    { name: "Alpha Amulet", subtype: "magic" },
+    { name: "Mystery Blob", subtype: "custom_kind" }
+  ];
+  const ordered = [...shuffled].sort(compareItemsForPilePlacement).map((r) => r.name);
+  assert(
+    ordered.join("|") ===
+      "Quest Letter|Alpha Amulet|Alpha Ring|Beta Potion|Loose Gems|Z Coin|Rope|Mystery Blob",
+    `item pile sort order (got ${ordered.join("|")})`
+  );
+
+  // Expo reference: 1920×1080, padding 0.25, grid 120 → Foundry rounds padY to 360.
+  const metrics = {
+    width: 2880,
+    height: 1800,
+    sceneWidth: 1920,
+    sceneHeight: 1080,
+    sceneX: 480,
+    sceneY: 360,
+    mapBottom: 1440,
+    canvasBottom: 1800,
+    gridSize: 120
+  };
+  const positions = layoutLocationItemPilePositions({
+    metrics,
+    grid: 120,
+    count: 7,
+    columns: ITEM_PILE_COLUMNS
+  });
+  assert(positions.length === 7, "7 pile positions");
+  assert(positions[0].x === 1800 && positions[0].y === 1440, "Item 1 at 1800,1440");
+  assert(positions[1].x === 1920 && positions[1].y === 1440, "Item 2 +1 grid x");
+  assert(positions[4].x === 2280 && positions[4].y === 1440, "Item 5 end of row");
+  assert(positions[5].x === 1800 && positions[5].y === 1560, "row 2 wraps +1 grid y");
+  assert(positions[6].x === 1920 && positions[6].y === 1560, "row 2 second slot");
+
+  const token = buildItemPileTokenData({
+    name: "Signet Ring",
+    x: 1800,
+    y: 1440,
+    img: "icons/svg/item-bag.svg",
+    itemUuid: "Item.abc",
+    dlceId: "itm_signet"
+  });
+  assert(token.name === "Signet Ring", "pile token uses item name");
+  assert(token.displayName === 50, "pile displayName ALWAYS");
+  assert(token.disposition === 1, "pile disposition friendly");
+  assert(token.width === 1 && token.height === 1, "pile footprint 1×1");
+  assert(token.texture.scaleX === ITEM_PILE_SCALE && token.texture.fit === "contain", "pile scale/fit");
+  assert(token.flags.itempiles == null, "item piles flag uses hyphenated scope");
+  assert(token.flags["item-piles"]?.data?.type === "pile", "item-piles data.type=pile");
+  assert(token.flags["item-piles"]?.data?.singleItemScale === 0.75, "singleItemScale 0.75");
+  assert(token.flags.dlfi?.kind === "item-pile", "dlfi kind item-pile");
+}
+
+// Bidirectional item ↔ location relationship collection
+{
+  const reverse = buildItemLocationsFromLocationLinks(
+    [{ id: "loc_trader", file: "documents/loc_trader.json" }],
+    () => ({
+      id: "loc_trader",
+      links: [
+        { target_type: "item", target_id: "itm_ring" },
+        { target_type: "npc", target_id: "npc_kira" }
+      ]
+    })
+  );
+  assert(
+    (reverse.get("itm_ring") || []).includes("loc_trader"),
+    "reverse index maps item ← location"
+  );
+  assert(!reverse.has("npc_kira"), "NPC links ignored in item reverse map");
+
+  const forwardOnly = collectItemLocationIds(
+    { id: "itm_a", locationIds: ["loc_a"] },
+    { links: [{ target_type: "location", target_id: "loc_b" }] },
+    []
+  );
+  assert(forwardOnly.includes("loc_a") && forwardOnly.includes("loc_b"), "forward locationIds + links");
+
+  const viaReverse = collectItemLocationIds(
+    { id: "itm_ring", locationIds: [] },
+    { links: [] },
+    reverse.get("itm_ring") ?? []
+  );
+  assert(viaReverse.includes("loc_trader"), "item places via reverse location→item link");
+
+  const both = collectItemLocationIds(
+    { id: "itm_ring", locationIds: ["loc_other"] },
+    { links: [{ target_type: "location", target_id: "loc_trader" }] },
+    reverse.get("itm_ring") ?? []
+  );
+  assert(
+    both.includes("loc_other") && both.includes("loc_trader") && both.length === 2,
+    "deduped bidirectional item locations"
+  );
 }
 
 if (failures) {

@@ -60,6 +60,68 @@ export function collectNpcLocationIds(entry, raw, reverseLocationIds = []) {
 }
 
 /**
+ * Build itemId → locationId[] from location documents that link *to* items
+ * (e.g. loc_trader "Contains" → itm_signet_ring).
+ * DLCE may store the containment link only on the location, not the item.
+ *
+ * @param {Iterable<{ id: string, file?: string }>} locationEntries
+ * @param {(file: string) => object|null} readDocument
+ * @returns {Map<string, string[]>}
+ */
+export function buildItemLocationsFromLocationLinks(locationEntries, readDocument) {
+  /** @type {Map<string, string[]>} */
+  const map = new Map();
+  for (const entry of locationEntries ?? []) {
+    const locationId = String(entry?.id ?? "");
+    if (!locationId) {
+      continue;
+    }
+    const raw = typeof readDocument === "function" ? readDocument(entry.file) : null;
+    for (const link of raw?.links ?? []) {
+      if (link?.target_type !== "item" || !link?.target_id) {
+        continue;
+      }
+      const itemId = String(link.target_id);
+      const list = map.get(itemId) ?? [];
+      if (!list.includes(locationId)) {
+        list.push(locationId);
+      }
+      map.set(itemId, list);
+    }
+  }
+  return map;
+}
+
+/**
+ * Collect location ids for an Item from the manifest entry, Item→location links,
+ * and reverse location→Item links.
+ *
+ * @param {object} entry
+ * @param {object|null|undefined} raw
+ * @param {string[]} [reverseLocationIds]
+ * @returns {string[]}
+ */
+export function collectItemLocationIds(entry, raw, reverseLocationIds = []) {
+  const ids = new Set();
+  for (const id of entry?.locationIds ?? []) {
+    if (id) {
+      ids.add(String(id));
+    }
+  }
+  for (const link of raw?.links ?? []) {
+    if (link?.target_type === "location" && link?.target_id) {
+      ids.add(String(link.target_id));
+    }
+  }
+  for (const id of reverseLocationIds ?? []) {
+    if (id) {
+      ids.add(String(id));
+    }
+  }
+  return [...ids];
+}
+
+/**
  * Build challengeId → host locationId[] from location→challenge links.
  * DLCE often stores "Hosts" only on the location; challenges may omit occurs_at.
  *

@@ -21,9 +21,11 @@ import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
   buildChallengeHostLocations,
+  buildItemLocationsFromLocationLinks,
   buildNpcLocationsFromLocationLinks,
   collectChallengeEnemies,
   collectCombatEnemyIds,
+  collectItemLocationIds,
   collectNpcLocationIds,
   formatPoisBulletList,
   locationDescriptionText,
@@ -42,10 +44,12 @@ import {
   shouldUploadPackagePath
 } from "./resolveLandingArt.mjs";
 import {
+  alertItemPilesMissing,
   finalizeBattlemapScene,
   finalizeLandingScene,
   finalizeLeftoversScene,
-  finalizeLocationScene
+  finalizeLocationScene,
+  isItemPilesActive
 } from "./scenePlacement.mjs";
 import {
   buildMsdSceneSequence,
@@ -272,7 +276,7 @@ export async function importSessionPackage(loaded, options = {}) {
 
   /** @type {Map<string, string>} dlce id -> Foundry doc uuid */
   const createdByDlceId = new Map();
-  /** @type {Map<string, { scene: Scene, description: string, poisText: string, npcs: Array<{actor: Actor, entry: object}> }>} */
+  /** @type {Map<string, { scene: Scene, description: string, poisText: string, sessionNotes: string, npcs: Array<{actor: Actor, entry: object}>, items: Array<{item: Item, name: string, subtype: string, dlceId: string|null}> }>} */
   const locationSceneMeta = new Map();
   /** @type {string[]} */
   const sessionSceneIds = [];
@@ -334,7 +338,8 @@ export async function importSessionPackage(loaded, options = {}) {
         description: locationDescriptionText(raw),
         poisText: formatPoisBulletList(locationPois(raw)),
         sessionNotes: locationSessionNotesText(raw, manifest),
-        npcs: []
+        npcs: [],
+        items: []
       });
       continue;
     }
@@ -618,13 +623,95 @@ export async function importSessionPackage(loaded, options = {}) {
     }
   }
 
-  // Bind NPCs into location template slots, fill descriptions, remove unused placeholders
+  // --- Items (before location finalize so piles land with NPCs/descriptions) ---
+  /** @type {Map<string, string[]>} locationId -> item uuids */
+  const itemsByLocation = new Map();
+  /** @type {Array<{ name: string, img?: string, uuid: string, dlceId: string }>} */
+  const leftoverItems = [];
+  const reverseItemLocations = buildItemLocationsFromLocationLinks(locations, readDocument);
+  for (const entry of (manifest.documents ?? []).filter((d) => d.type === "item")) {
+    const raw = readDocument(entry.file) ?? {};
+    const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
+    const fields = raw?.fields ?? {};
+    const subtype = entry.subtype ?? fields.subtype ?? "plot";
+    const item = await Item.create({
+      name: entry.name,
+      type: mapItemType(subtype, fields),
+      img: portrait || undefined,
+      folder: folders.Item?.id ?? null,
+      system: {
+        description: {
+          value: markdownToHtml(
+            fields.description || fields.appearance || fields.effect || fields.text || ""
+          )
+        },
+        rarity: String(fields.rarity || "").toLowerCase() || undefined
+      },
+      flags: {
+        [FLAG_SCOPE]: {
+          dlceId: entry.id,
+          subtype,
+          locationIds: entry.locationIds ?? [],
+          importKey
+        }
+      }
+    });
+    createdByDlceId.set(entry.id, item.uuid);
+    const locationIds = collectItemLocationIds(
+      entry,
+      raw,
+      reverseItemLocations.get(entry.id) ?? []
+    );
+    if (locationIds.length) {
+      for (const locationId of locationIds) {
+        const list = itemsByLocation.get(locationId) ?? [];
+        list.push(item.uuid);
+        itemsByLocation.set(locationId, list);
+        const meta = locationSceneMeta.get(locationId);
+        if (meta) {
+          meta.items.push({
+            item,
+            name: entry.name,
+            subtype,
+            dlceId: entry.id
+          });
+        }
+      }
+    } else {
+      leftoverItems.push({
+        name: entry.name,
+        img: item.img || portrait || undefined,
+        uuid: item.uuid,
+        dlceId: entry.id
+      });
+    }
+  }
+
+  // One modal for the whole import if Item Piles is missing but locations have items.
+  const locationItemsFlat = [...locationSceneMeta.values()].flatMap((meta) =>
+    (meta.items ?? []).map((row) => ({
+      ...row,
+      sceneName: meta.scene?.name
+    }))
+  );
+  const itemPilesActive = isItemPilesActive();
+  if (locationItemsFlat.length && !itemPilesActive) {
+    await alertItemPilesMissing({
+      scene: { name: `${folderName} (location scenes)` },
+      items: locationItemsFlat
+    });
+  }
+
+  // Bind NPCs into location template slots, fill descriptions, place item piles
   for (const meta of locationSceneMeta.values()) {
     await finalizeLocationScene(meta.scene, {
       description: meta.description,
       poisText: meta.poisText,
       sessionNotes: meta.sessionNotes,
-      npcs: meta.npcs
+      npcs: meta.npcs,
+      // Skip per-scene dialogs when we already alerted above.
+      items: itemPilesActive ? meta.items : [],
+      skipItemPiles: !itemPilesActive
     });
   }
 
@@ -724,62 +811,6 @@ export async function importSessionPackage(loaded, options = {}) {
 
   if (landingScene) {
     await finalizeLandingScene(landingScene, sessionPcs);
-  }
-
-  // --- Items ---
-  /** @type {Map<string, string[]>} locationId -> item uuids */
-  const itemsByLocation = new Map();
-  /** @type {Array<{ name: string, img?: string, uuid: string, dlceId: string }>} */
-  const leftoverItems = [];
-  for (const entry of (manifest.documents ?? []).filter((d) => d.type === "item")) {
-    const raw = readDocument(entry.file) ?? {};
-    const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
-    const fields = raw?.fields ?? {};
-    const item = await Item.create({
-      name: entry.name,
-      type: mapItemType(entry.subtype, fields),
-      img: portrait || undefined,
-      folder: folders.Item?.id ?? null,
-      system: {
-        description: {
-          value: markdownToHtml(
-            fields.description || fields.appearance || fields.effect || fields.text || ""
-          )
-        },
-        rarity: String(fields.rarity || "").toLowerCase() || undefined
-      },
-      flags: {
-        [FLAG_SCOPE]: {
-          dlceId: entry.id,
-          subtype: entry.subtype ?? "plot",
-          locationIds: entry.locationIds ?? [],
-          importKey
-        }
-      }
-    });
-    createdByDlceId.set(entry.id, item.uuid);
-    const locationIds = [
-      ...new Set([
-        ...(entry.locationIds ?? []),
-        ...((raw?.links ?? [])
-          .filter((link) => link?.target_type === "location" && link?.target_id)
-          .map((link) => String(link.target_id)))
-      ])
-    ];
-    if (locationIds.length) {
-      for (const locationId of locationIds) {
-        const list = itemsByLocation.get(locationId) ?? [];
-        list.push(item.uuid);
-        itemsByLocation.set(locationId, list);
-      }
-    } else {
-      leftoverItems.push({
-        name: entry.name,
-        img: item.img || portrait || undefined,
-        uuid: item.uuid,
-        dlceId: entry.id
-      });
-    }
   }
 
   // Leftovers: NPCs not on any location/battlemap + items without a location

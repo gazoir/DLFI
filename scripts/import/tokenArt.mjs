@@ -12,9 +12,15 @@
 
 /** Foundry CONST.TOKEN_DISPLAY_MODES.HOVER — "Hovered by Anyone". */
 export const TOKEN_DISPLAY_HOVER = 30;
+/** Foundry CONST.TOKEN_DISPLAY_MODES.ALWAYS — "Always Displayed". */
+export const TOKEN_DISPLAY_ALWAYS = 50;
 
 export function tokenDisplayHover() {
   return globalThis.CONST?.TOKEN_DISPLAY_MODES?.HOVER ?? TOKEN_DISPLAY_HOVER;
+}
+
+export function tokenDisplayAlways() {
+  return globalThis.CONST?.TOKEN_DISPLAY_MODES?.ALWAYS ?? TOKEN_DISPLAY_ALWAYS;
 }
 
 export function isWildcardPath(path) {
