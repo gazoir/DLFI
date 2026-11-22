@@ -17,6 +17,7 @@ import {
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import {
+  alertEmptyPcs,
   alertPcStubResults,
   buildExistingPcFillPatch,
   buildPcActorData
@@ -617,14 +618,12 @@ export async function importSessionPackage(loaded, options = {}) {
     names: manifestPcs.map((pc) => pc.knownAs || pc.name || pc.id)
   });
   if (!manifestPcs.length) {
-    console.warn(
-      `${MODULE_ID} | manifest.pcs is empty — no Player Character stubs will be created. ` +
-        `In DLCE, seat PCs on the active Game, then re-export the Session Package.`
-    );
-    notify(
-      "DLFI: package has 0 seated PCs — seat PCs on the active Game in DLCE and re-export.",
-      { type: "warning" }
-    );
+    await alertEmptyPcs({
+      sessionName: manifest.sessionName ?? folderName,
+      displayCode: manifest.displayCode ?? manifest.sessionCode,
+      partyLevel: manifest.partyLevel ?? null,
+      exportedAt: manifest.exportedAt ?? null
+    });
   }
 
   const pcActorTemplate = await loadBundledPcActorTemplate();

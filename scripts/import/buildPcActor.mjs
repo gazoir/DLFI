@@ -250,6 +250,63 @@ export function parseDdbCharacterId(url) {
 }
 
 /**
+ * Modal when the Session Package has no seated PCs (`manifest.pcs` empty).
+ * Damned Lucky folder may still be created, but no character Actors / Landing
+ * party tokens can be placed without package entries.
+ *
+ * @param {{
+ *   sessionName?: string|null,
+ *   displayCode?: string|null,
+ *   partyLevel?: number|null,
+ *   exportedAt?: string|null
+ * }} [info]
+ */
+export async function alertEmptyPcs(info = {}) {
+  const label =
+    [info.displayCode, info.sessionName].filter(Boolean).join(" · ") || "this session";
+  console.warn(`${MODULE_ID} | manifest.pcs is empty — no PC Actors will be created`, {
+    ...info,
+    hint: "In DLCE, seat named PCs on the active Game (or apply a named Party), export again, then import the new zip."
+  });
+
+  const partyLevel =
+    info.partyLevel != null && Number.isFinite(Number(info.partyLevel))
+      ? ` Package partyLevel=${Number(info.partyLevel)} (generic party TPL does not create PC Actors).`
+      : "";
+  const exported = info.exportedAt
+    ? ` Package exportedAt=<code>${escapeHtmlLite(info.exportedAt)}</code>.`
+    : "";
+
+  const content =
+    `<p><strong>${escapeHtmlLite(label)}</strong> has <strong>0 seated PCs</strong> in the Session Package.</p>` +
+    `<p>DLFI created the <strong>Damned Lucky</strong> Actor folder, but left it empty. ` +
+    `Landing / battlemap party tokens were also skipped.</p>` +
+    `<p>In <strong>DLCE</strong>: open the active Game → seat named Player Characters ` +
+    `(or apply a named Party) → click <strong>Foundry</strong> again → import the <em>new</em> zip in DLFI.` +
+    `${partyLevel}${exported}</p>`;
+
+  const DialogV2 = globalThis.foundry?.applications?.api?.DialogV2;
+  if (DialogV2?.prompt) {
+    await DialogV2.prompt({
+      window: { title: "No seated PCs in package" },
+      content,
+      ok: { label: "OK" }
+    });
+    return;
+  }
+  if (typeof globalThis.Dialog?.prompt === "function") {
+    await globalThis.Dialog.prompt({
+      title: "No seated PCs in package",
+      content,
+      label: "OK",
+      callback: () => undefined
+    });
+    return;
+  }
+  console.warn(`${MODULE_ID} | ${content.replace(/<[^>]+>/g, " ")}`);
+}
+
+/**
  * Modal summarizing PC stub creation when any stub lacks a D&D Beyond URL.
  *
  * @param {{
