@@ -11,12 +11,14 @@ import {
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
   SETTING_TEMPLATE_LANDING,
-  SETTING_TEMPLATE_LOCATION,
-  TOKEN_DISPOSITION
+  SETTING_TEMPLATE_LOCATION
 } from "../constants.mjs";
-import { tokenDisplayHover } from "./tokenArt.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
-import { buildPcActorData } from "./buildPcActor.mjs";
+import {
+  alertPcStubResults,
+  buildExistingPcFillPatch,
+  buildPcActorData
+} from "./buildPcActor.mjs";
 import { applySceneBackground } from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
@@ -58,7 +60,8 @@ import {
 import { convertMsdHtmlForFoundry } from "./msdJournal.mjs";
 import {
   bundledKindForSetting,
-  createSceneFromBundledTemplate
+  createSceneFromBundledTemplate,
+  loadBundledPcActorTemplate
 } from "./defaultTemplates.mjs";
 import { ensureSessionFolders, setExclusiveSceneNavigation } from "./folders.mjs";
 import { purgeSessionAssets, purgeSessionDocuments } from "./sessions.mjs";
@@ -533,35 +536,28 @@ export async function importSessionPackage(loaded, options = {}) {
   const pcActorsByDlceId = new Map();
   /** @type {Array<{ actor: Actor, ownerPcId: string, pet: object }>} */
   const sessionPets = [];
+  /** @type {Array<{ name: string, knownAs?: string|null, ddbUrl?: string|null, id?: string|null }>} */
+  const createdPcStubs = [];
+  /** @type {Array<{ name: string, knownAs?: string|null, id?: string|null }>} */
+  const pcsMissingDdb = [];
+
+  const pcActorTemplate = await loadBundledPcActorTemplate();
+  if (!pcActorTemplate) {
+    console.warn(
+      `${MODULE_ID} | bundled PC actor template missing — falling back to minimal character stub`
+    );
+  }
 
   for (const pc of manifest.pcs ?? []) {
     const portrait = pc.portrait ? uploaded.get(pc.portrait) || null : null;
     const token = pc.token ? uploaded.get(pc.token) || null : null;
     let actor = matchExistingPcActor(pc);
     if (actor) {
-      const patch = {};
-      if (portrait && actor.img !== portrait) {
-        patch.img = portrait;
-      }
-      if (token) {
-        patch["prototypeToken.texture.src"] = token;
-      }
-      if (pc.tokenScale != null && Number(pc.tokenScale) > 0) {
-        patch["prototypeToken.texture.scaleX"] = Number(pc.tokenScale);
-        patch["prototypeToken.texture.scaleY"] = Number(pc.tokenScale);
-      }
-      // Re-imports: ensure matched PCs stay Friendly even if a prior stub was Hostile.
-      patch["prototypeToken.disposition"] = TOKEN_DISPOSITION.FRIENDLY;
-      patch["prototypeToken.displayName"] = tokenDisplayHover();
-      const knownAs =
-        String(pc.knownAs || "").trim() ||
-        String(pc.name || actor.name || "")
-          .trim()
-          .split(/\s+/)[0] ||
-        actor.name;
-      if (knownAs) {
-        patch["prototypeToken.name"] = knownAs;
-      }
+      const patch = buildExistingPcFillPatch(actor, pc, {
+        portrait,
+        token,
+        tokenScale: pc.tokenScale
+      });
       if (Object.keys(patch).length) {
         await actor.update(patch);
       }
@@ -571,12 +567,27 @@ export async function importSessionPackage(loaded, options = {}) {
         token,
         tokenScale: pc.tokenScale,
         folderId: folders.Actor?.id ?? null,
-        importKey
+        importKey,
+        template: pcActorTemplate
       });
       actor = await Actor.create(actorData);
+      const stubInfo = {
+        name: String(pc.name || actor.name || "").trim() || actor.name,
+        knownAs: pc.knownAs ?? null,
+        ddbUrl: pc.ddbUrl ?? null,
+        id: pc.id ?? null
+      };
+      createdPcStubs.push(stubInfo);
+      if (!String(pc.ddbUrl || "").trim() && !(pc.ddbId != null && String(pc.ddbId).trim())) {
+        pcsMissingDdb.push({
+          name: stubInfo.name,
+          knownAs: stubInfo.knownAs,
+          id: stubInfo.id
+        });
+      }
       console.log(
         `${MODULE_ID} | created PC stub ${actor.name}` +
-          (pc.ddbUrl ? ` (DDB ${pc.ddbId || pc.ddbUrl})` : "")
+          (pc.ddbUrl ? ` (DDB ${pc.ddbId || pc.ddbUrl})` : " (no DDB URL)")
       );
     }
     if (pc.id) {
@@ -879,6 +890,13 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   await setSetting(SETTING_LIVE_SESSION, sessionKey(manifest));
+
+  if (pcsMissingDdb.length) {
+    await alertPcStubResults({
+      created: createdPcStubs,
+      missingDdb: pcsMissingDdb
+    });
+  }
 
   notify(
     `Imported ${folderName}: ${locations.length} locations, ${battlemapMeta.length} battlemaps, actors/items created, Landing active.`,
