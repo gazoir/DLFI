@@ -15,8 +15,16 @@
  *   right-aligned to the map edge), matching Expo Scene Template Item 1–5
  */
 
-import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
+import {
+  FLAG_SCOPE,
+  ITEM_PILES_FOLDER_NAME,
+  MODULE_ID,
+  TOKEN_DISPOSITION
+} from "../constants.mjs";
 import { pickTokenTexture, tokenDisplayAlways, tokenDisplayHover } from "./tokenArt.mjs";
+
+/** Expo / world template placeholders: "Item 1" … "Item 5". */
+export const ITEM_PILE_PLACEHOLDER_NAME_RE = /^Item\s*\d+$/i;
 
 const NPC_SLOT_RE = /^(\d+)A(\d+)$/i;
 const PC_SLOT_RE = /^(\d+)P(\d+)$/i;
@@ -205,6 +213,9 @@ export function buildItemPileTokenData({
     height: 1,
     x: Math.round(Number(x) || 0),
     y: Math.round(Number(y) || 0),
+    // Foundry V10+ uses sight.enabled; older builds used vision.
+    vision: false,
+    sight: { enabled: false },
     texture,
     flags: {
       [ITEM_PILES_FLAG_SCOPE]: {
@@ -221,16 +232,49 @@ export function buildItemPileTokenData({
 }
 
 /**
+ * Template Item 1–N placeholders or any Item Piles–flagged token to clear
+ * before placing DLFI piles (world Expo template keeps Item 1–5).
+ * @param {object} token
+ * @returns {boolean}
+ */
+export function isLocationItemPilePlaceholderToken(token) {
+  const name = String(token?.name ?? "").trim();
+  if (ITEM_PILE_PLACEHOLDER_NAME_RE.test(name)) {
+    return true;
+  }
+  const flags = token?.flags ?? {};
+  if (flags[ITEM_PILES_FLAG_SCOPE] || flags.itempiles) {
+    return true;
+  }
+  const kind = flags[FLAG_SCOPE]?.kind;
+  return kind === "item-pile" || Boolean(flags[FLAG_SCOPE]?.itemPile);
+}
+
+/**
  * @param {Scene} scene
  * @returns {object[]}
  */
 export function listDlfiItemPileTokens(scene) {
-  return [...(scene?.tokens?.contents ?? scene?.tokens ?? [])].filter((token) => {
-    const kind = token?.flags?.[FLAG_SCOPE]?.kind;
-    if (kind === "item-pile") return true;
-    // Legacy / API-created piles we tagged only via item uuid on prior runs.
-    return Boolean(token?.flags?.[FLAG_SCOPE]?.itemPile);
-  });
+  return [...(scene?.tokens?.contents ?? scene?.tokens ?? [])].filter((token) =>
+    isLocationItemPilePlaceholderToken(token)
+  );
+}
+
+/**
+ * @param {Item|object|null|undefined} item
+ * @returns {object|null}
+ */
+export function itemDataForPile(item) {
+  if (!item) {
+    return null;
+  }
+  if (typeof item.toObject === "function") {
+    return item.toObject();
+  }
+  if (item.item && typeof item.item.toObject === "function") {
+    return item.item.toObject();
+  }
+  return foundry.utils.duplicate(item.item ?? item);
 }
 
 /**
@@ -333,26 +377,91 @@ function escapeHtmlLite(value) {
 }
 
 /**
- * Clear prior DLFI item-pile tokens and place one pile per related Item.
+ * Remove Expo "Item 1…N" placeholders and prior DLFI / Item Piles tokens.
+ * @param {Scene} scene
+ * @returns {Promise<number>} deleted count
+ */
+export async function clearLocationItemPileTokens(scene) {
+  if (!scene) return 0;
+  const prior = listDlfiItemPileTokens(scene);
+  const ids = prior.map((t) => t.id).filter(Boolean);
+  if (!ids.length) {
+    return 0;
+  }
+  await scene.deleteEmbeddedDocuments("Token", ids);
+  console.log(
+    `${MODULE_ID} | ${scene.name}: cleared ${ids.length} Item Pile placeholder/prior token(s)`
+  );
+  return ids.length;
+}
+
+/**
+ * Ensure the world Item Pile actor holds the package item and uses its portrait.
+ * (Item Piles stores loot on the unlinked token actor by default; sidebar actors
+ * stay empty unless we also seed the world Actor.)
+ *
+ * @param {string|null|undefined} actorUuid
+ * @param {Item|object|null} item
+ * @param {{ img?: string|null, folderId?: string|null, name?: string|null }} [opts]
+ */
+export async function finalizeItemPileActor(actorUuid, item, opts = {}) {
+  if (!actorUuid || !globalThis.fromUuid) {
+    return null;
+  }
+  const pileActor = await globalThis.fromUuid(actorUuid);
+  if (!pileActor) {
+    return null;
+  }
+
+  const img = opts.img || item?.img || null;
+  const name = opts.name || item?.name || pileActor.name;
+  const patch = {};
+  if (name && pileActor.name !== name) {
+    patch.name = name;
+  }
+  if (img && pileActor.img !== img) {
+    patch.img = img;
+  }
+  if (opts.folderId && (pileActor.folder?.id ?? pileActor.folder) !== opts.folderId) {
+    patch.folder = opts.folderId;
+  }
+  if (Object.keys(patch).length) {
+    await pileActor.update(patch);
+  }
+
+  const itemData = itemDataForPile(item);
+  if (itemData) {
+    const hasItems = (pileActor.items?.size ?? pileActor.items?.length ?? 0) > 0;
+    if (!hasItems) {
+      const api = globalThis.game?.itempiles?.API;
+      if (typeof api?.addItems === "function") {
+        try {
+          await api.addItems(pileActor, [itemData]);
+        } catch (error) {
+          console.warn(`${MODULE_ID} | addItems failed for ${pileActor.name}; embedding directly`, error);
+          await pileActor.createEmbeddedDocuments("Item", [itemData]);
+        }
+      } else {
+        await pileActor.createEmbeddedDocuments("Item", [itemData]);
+      }
+    }
+  }
+  return pileActor;
+}
+
+/**
+ * Clear prior/template item-pile tokens and place one pile per related Item.
  * Prefers `game.itempiles.API.createItemPile`; falls back to Token create with
  * Item Piles flags when the API is missing but the module is active.
  *
  * @param {Scene} scene
  * @param {Array<{ item: Item, name?: string, subtype?: string, dlceId?: string|null }>} items
+ * @param {{ actorFolderId?: string|null, sessionFolderName?: string|null }} [options]
  */
-export async function placeLocationItemPiles(scene, items = []) {
+export async function placeLocationItemPiles(scene, items = [], options = {}) {
   if (!scene) return;
 
-  const prior = listDlfiItemPileTokens(scene);
-  if (prior.length) {
-    await scene.deleteEmbeddedDocuments(
-      "Token",
-      prior.map((t) => t.id).filter(Boolean)
-    );
-    console.log(
-      `${MODULE_ID} | ${scene.name}: cleared ${prior.length} prior DLFI item-pile token(s)`
-    );
-  }
+  await clearLocationItemPileTokens(scene);
 
   const rows = [...(items ?? [])].filter((row) => row?.item || row?.uuid);
   if (!rows.length) {
@@ -363,6 +472,14 @@ export async function placeLocationItemPiles(scene, items = []) {
     await alertItemPilesMissing({ scene, items: rows });
     return;
   }
+
+  const actorFolderId = options.actorFolderId ?? null;
+  const sessionFolderName = options.sessionFolderName ?? null;
+  /** @type {string[]|false} */
+  const folders =
+    sessionFolderName && !actorFolderId
+      ? [sessionFolderName, ITEM_PILES_FOLDER_NAME]
+      : false;
 
   const sorted = [...rows].sort(compareItemsForPilePlacement);
   const metrics = sceneCanvasMetrics(scene);
@@ -388,6 +505,7 @@ export async function placeLocationItemPiles(scene, items = []) {
     const dlceId =
       row.dlceId ?? item?.flags?.[FLAG_SCOPE]?.dlceId ?? null;
     const itemUuid = item?.uuid ?? row.uuid ?? null;
+    const itemPayload = itemDataForPile(item);
 
     if (typeof api?.createItemPile === "function") {
       try {
@@ -395,15 +513,22 @@ export async function placeLocationItemPiles(scene, items = []) {
           position: { x: pos.x, y: pos.y },
           sceneId: scene.id,
           createActor: true,
-          items: item ? [item] : [],
+          items: itemPayload ? [itemPayload] : [],
           itemPileFlags: { ...ITEM_PILE_DATA_FLAGS },
-          actorOverrides: { name },
+          folders,
+          actorOverrides: {
+            name,
+            ...(img ? { img } : {}),
+            ...(actorFolderId ? { folder: actorFolderId } : {})
+          },
           tokenOverrides: {
             name,
             disposition: TOKEN_DISPOSITION.FRIENDLY,
             displayName: tokenDisplayAlways(),
             width: 1,
             height: 1,
+            vision: false,
+            sight: { enabled: false },
             texture: {
               ...(img ? { src: img } : {}),
               scaleX: ITEM_PILE_SCALE,
@@ -419,18 +544,31 @@ export async function placeLocationItemPiles(scene, items = []) {
             }
           }
         });
-        // Tag the created token if the API ignored our flags merge.
+
         const tokenUuid = result?.tokenUuid ?? result?.token?.uuid ?? null;
+        const actorUuid = result?.actorUuid ?? result?.actor?.uuid ?? null;
+
         if (tokenUuid && globalThis.fromUuid) {
           const tokenDoc = await globalThis.fromUuid(tokenUuid);
           if (tokenDoc?.update) {
             await tokenDoc.update({
               [`flags.${FLAG_SCOPE}.kind`]: "item-pile",
               [`flags.${FLAG_SCOPE}.itemUuid`]: itemUuid,
-              [`flags.${FLAG_SCOPE}.dlceId`]: dlceId
+              [`flags.${FLAG_SCOPE}.dlceId`]: dlceId,
+              vision: false,
+              "sight.enabled": false,
+              ...(img ? { "texture.src": img } : {}),
+              name
             });
           }
         }
+
+        await finalizeItemPileActor(actorUuid, itemPayload ?? item, {
+          img,
+          folderId: actorFolderId,
+          name
+        });
+
         placed += 1;
         continue;
       } catch (error) {
@@ -464,7 +602,8 @@ export async function placeLocationItemPiles(scene, items = []) {
 
   console.log(
     `${MODULE_ID} | ${scene.name}: placed ${placed}/${sorted.length} location item pile(s) ` +
-      `(grid=${grid}, mapBottom=${metrics.mapBottom}, cols=${ITEM_PILE_COLUMNS})`
+      `(grid=${grid}, mapBottom=${metrics.mapBottom}, cols=${ITEM_PILE_COLUMNS}` +
+      `${actorFolderId ? `, folder=${ITEM_PILES_FOLDER_NAME}` : ""})`
   );
 }
 
@@ -558,7 +697,9 @@ export async function finalizeLocationScene(
     sessionNotes = "",
     npcs = [],
     items = [],
-    skipItemPiles = false
+    skipItemPiles = false,
+    itemPilesFolderId = null,
+    sessionFolderName = null
   } = {}
 ) {
   if (!scene) return;
@@ -601,20 +742,21 @@ export async function finalizeLocationScene(
   // Also clear leftover PC placeholders on location scenes
   deleteTokenIds.push(...listPcSlots(scene).map((t) => t.id));
 
+  // Drop Expo "Item 1…N" / Item Piles placeholders with unused NPC/PC slots
+  // (also cleared again inside placeLocationItemPiles before placing).
+  deleteTokenIds.push(...listDlfiItemPileTokens(scene).map((t) => t.id).filter(Boolean));
+
   await deleteEmbedded(scene, deleteDrawingIds, deleteTokenIds);
 
   // Item piles in lower-right padding (requires Item Piles module when items exist).
   if (!skipItemPiles) {
-    await placeLocationItemPiles(scene, items);
+    await placeLocationItemPiles(scene, items, {
+      actorFolderId: itemPilesFolderId,
+      sessionFolderName
+    });
   } else {
-    // Module missing (caller already alerted): clear stale piles, never place fakes.
-    const prior = listDlfiItemPileTokens(scene);
-    if (prior.length) {
-      await scene.deleteEmbeddedDocuments(
-        "Token",
-        prior.map((t) => t.id).filter(Boolean)
-      );
-    }
+    // Module missing (caller already alerted): clear placeholders/stale piles, never place fakes.
+    await clearLocationItemPileTokens(scene);
   }
 }
 

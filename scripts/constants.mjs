@@ -33,6 +33,12 @@ export const FLAG_SCOPE = MODULE_ID;
  */
 export const PC_ACTOR_FOLDER_NAME = "Damned Lucky";
 
+/**
+ * Child Actor folder under each session folder for Item Pile actors.
+ * e.g. `DL304 · Mist Opportunity` / `Item Piles`.
+ */
+export const ITEM_PILES_FOLDER_NAME = "Item Piles";
+
 /** Foundry CONST.TOKEN_DISPOSITIONS — keep numeric so Node selftests work offline. */
 export const TOKEN_DISPOSITION = Object.freeze({
   SECRET: -2,
