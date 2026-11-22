@@ -122,9 +122,16 @@ export function pickDataFolder(current = "") {
   });
 }
 
+/** Once-per-session note when Foundry has no public Data/ delete API (V14+). */
+let loggedDeleteUnsupported = false;
+
 /**
- * Best-effort delete of a Data/ file. Foundry versions vary; failures are logged.
+ * Best-effort delete of a Data/ file.
+ * Uses FilePicker.deletePath when present (Foundry ≤13). Foundry V14 removed
+ * `/filesystem` and has no public delete API — do not POST that route (route
+ * 404s spam the console and must not be treated as successful deletes).
  * @param {string} path
+ * @returns {Promise<boolean>} true when deleted or already absent via deletePath
  */
 export async function deleteDataFile(path) {
   const target = normalizeDataPath(path);
@@ -132,42 +139,24 @@ export async function deleteDataFile(path) {
     return false;
   }
   const FP = getFilePicker();
-  try {
-    if (typeof FP.deletePath === "function") {
+  if (typeof FP.deletePath === "function") {
+    try {
       await FP.deletePath("data", target);
       return true;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        console.debug(`${MODULE_ID} | already gone (404): ${target}`);
+        return true;
+      }
+      console.warn(`${MODULE_ID} | FilePicker.deletePath failed for ${target}`, error);
+      return false;
     }
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      console.debug(`${MODULE_ID} | already gone (404): ${target}`);
-      return true;
-    }
-    console.warn(`${MODULE_ID} | FilePicker.deletePath failed for ${target}`, error);
   }
-  try {
-    const response = await fetch(foundry.utils.getRoute("filesystem"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "deleteFiles",
-        source: "data",
-        paths: [target]
-      })
-    });
-    if (response.ok) {
-      return true;
-    }
-    if (response.status === 404) {
-      console.debug(`${MODULE_ID} | already gone (404): ${target}`);
-      return true;
-    }
-    console.warn(`${MODULE_ID} | filesystem delete failed for ${target}`, response.status);
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      console.debug(`${MODULE_ID} | already gone (404): ${target}`);
-      return true;
-    }
-    console.warn(`${MODULE_ID} | could not delete ${target}`, error);
+  if (!loggedDeleteUnsupported) {
+    loggedDeleteUnsupported = true;
+    console.debug(
+      `${MODULE_ID} | Data/ file delete unsupported (no FilePicker.deletePath; Foundry V14+ has no public delete API). Skipping deletes.`
+    );
   }
   return false;
 }
