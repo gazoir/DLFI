@@ -1,6 +1,7 @@
 /**
- * Bundled scene templates shipped with the module.
- * Used when module settings have no Scene id/UUID configured.
+ * Bundled scene / actor templates shipped with the module.
+ * Used when module settings have no Scene id/UUID configured,
+ * and when creating PC character stubs.
  */
 
 import { MODULE_ID } from "../constants.mjs";
@@ -12,8 +13,34 @@ const BUNDLED = {
   leftovers: "templates/scenes/leftovers.json"
 };
 
+const BUNDLED_PC_ACTOR = "templates/actors/player-character.json";
+
 /** @type {Map<string, object>} */
 const cache = new Map();
+
+/**
+ * @param {string} cacheKey
+ * @param {string} rel module-relative path
+ * @returns {Promise<object|null>}
+ */
+async function loadBundledJson(cacheKey, rel) {
+  if (cache.has(cacheKey)) {
+    return foundry.utils.duplicate(cache.get(cacheKey));
+  }
+  const url = `modules/${MODULE_ID}/${rel}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    cache.set(cacheKey, data);
+    return foundry.utils.duplicate(data);
+  } catch (error) {
+    console.warn(`${MODULE_ID} | failed to load bundled template ${cacheKey} from ${url}`, error);
+    return null;
+  }
+}
 
 /**
  * @param {"location"|"battlemap"|"landing"|"leftovers"} kind
@@ -24,22 +51,15 @@ export async function loadBundledSceneTemplate(kind) {
   if (!rel) {
     return null;
   }
-  if (cache.has(kind)) {
-    return foundry.utils.duplicate(cache.get(kind));
-  }
-  const url = `modules/${MODULE_ID}/${rel}`;
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const data = await response.json();
-    cache.set(kind, data);
-    return foundry.utils.duplicate(data);
-  } catch (error) {
-    console.warn(`${MODULE_ID} | failed to load bundled template ${kind} from ${url}`, error);
-    return null;
-  }
+  return loadBundledJson(kind, rel);
+}
+
+/**
+ * Bundled empty Player Character actor (DDB-ready stub scaffold).
+ * @returns {Promise<object|null>}
+ */
+export async function loadBundledPcActorTemplate() {
+  return loadBundledJson("pc-actor", BUNDLED_PC_ACTOR);
 }
 
 /**

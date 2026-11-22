@@ -104,7 +104,21 @@ const {
   isCombatChallengeEntry,
   padSceneOrder
 } = await import("./sceneOrder.mjs");
-const { buildPcActorData, parseDdbCharacterId } = await import("./buildPcActor.mjs");
+const {
+  actorHasDdbLink,
+  buildExistingPcFillPatch,
+  buildPcActorData,
+  DEFAULT_PC_ART,
+  isMissingPcArt,
+  parseDdbCharacterId
+} = await import("./buildPcActor.mjs");
+const { fileURLToPath } = await import("node:url");
+const { dirname, join } = await import("node:path");
+const PC_TEMPLATE_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../templates/actors/player-character.json"
+);
+const pcActorTemplate = JSON.parse(readFileSync(PC_TEMPLATE_PATH, "utf8"));
 const { convertMsdHtmlForFoundry } = await import("./msdJournal.mjs");
 const {
   packageImportRoot,
@@ -976,6 +990,11 @@ for (const path of paths) {
 // PC actor stub for DDB importer + battlemap roster layout
 {
   assert(parseDdbCharacterId("https://www.dndbeyond.com/characters/118758199") === "118758199", "parse DDB id");
+  assert(pcActorTemplate.type === "character", "bundled PC template is character");
+  assert(pcActorTemplate.system?.abilities, "bundled PC template keeps dnd5e system scaffold");
+  assert(isMissingPcArt(DEFAULT_PC_ART), "default system icon counts as missing art");
+  assert(!isMissingPcArt("world/ibby.webp"), "package art is present");
+
   const stub = buildPcActorData(
     {
       id: "pc_ibby",
@@ -984,10 +1003,16 @@ for (const path of paths) {
       ddbUrl: "https://www.dndbeyond.com/characters/118758199",
       ddbId: "118758199"
     },
-    { portrait: "world/ibby.webp", token: "world/ibby_token.webp", tokenScale: 1.1 }
+    {
+      portrait: "world/ibby.webp",
+      token: "world/ibby_token.webp",
+      tokenScale: 1.1,
+      template: pcActorTemplate
+    }
   );
   assert(stub.type === "character", "PC stub is character");
   assert(stub.name === "Isabella Brightblade", "PC actor keeps full name");
+  assert(stub.system?.abilities, "PC stub clones template system");
   assert(stub.flags?.ddbimporter?.dndbeyond?.url?.includes("118758199"), "DDB url flag");
   assert(stub.flags?.ddbimporter?.dndbeyond?.characterId === "118758199", "DDB characterId flag");
   assert(stub.prototypeToken?.actorLink === true, "PC prototype linked");
@@ -996,6 +1021,69 @@ for (const path of paths) {
   assert(stub.prototypeToken?.displayName === 30, "PC default token Hovered by Anyone");
   assert(stub.prototypeToken?.texture?.src === "world/ibby_token.webp", "PC token art");
   assert(stub.prototypeToken?.texture?.scaleX === 1.1, "PC VTTTT scale");
+  assert(stub.img === "world/ibby.webp", "PC portrait from package");
+
+  const noDdb = buildPcActorData(
+    { id: "pc_raw", name: "Raw PC", knownAs: "Raw" },
+    { template: pcActorTemplate }
+  );
+  assert(!noDdb.flags?.ddbimporter?.dndbeyond?.url, "missing DDB leaves url empty");
+  assert(!noDdb.flags?.ddbimporter?.dndbeyond?.characterId, "missing DDB leaves characterId empty");
+
+  const existing = {
+    name: "Isabella Brightblade",
+    img: "world/existing.webp",
+    prototypeToken: {
+      name: "Ibby",
+      texture: { src: "world/existing_token.webp", scaleX: 1, scaleY: 1 }
+    },
+    flags: {
+      ddbimporter: {
+        dndbeyond: {
+          url: "https://www.dndbeyond.com/characters/118758199",
+          characterId: "118758199"
+        }
+      }
+    }
+  };
+  assert(actorHasDdbLink(existing), "existing actor reports DDB link");
+  const fillKeep = buildExistingPcFillPatch(
+    existing,
+    {
+      name: "Isabella Brightblade",
+      knownAs: "Ibby2",
+      ddbUrl: "https://www.dndbeyond.com/characters/999",
+      ddbId: "999",
+      tokenScale: 2
+    },
+    { portrait: "world/new.webp", token: "world/new_token.webp" }
+  );
+  assert(!fillKeep.img, "fill-only does not overwrite existing portrait");
+  assert(!fillKeep["prototypeToken.texture.src"], "fill-only does not overwrite existing token");
+  assert(!fillKeep["prototypeToken.name"], "fill-only does not overwrite existing Known as");
+  assert(!fillKeep["flags.ddbimporter.dndbeyond"], "fill-only does not overwrite existing DDB");
+
+  const emptyish = {
+    name: "New PC",
+    img: DEFAULT_PC_ART,
+    prototypeToken: { name: "", texture: { src: DEFAULT_PC_ART } },
+    flags: {}
+  };
+  const fillMissing = buildExistingPcFillPatch(
+    emptyish,
+    {
+      name: "New PC",
+      knownAs: "Newbie",
+      ddbUrl: "https://www.dndbeyond.com/characters/42",
+      ddbId: "42",
+      tokenScale: 1.25
+    },
+    { portrait: "world/new.webp", token: "world/new_token.webp" }
+  );
+  assert(fillMissing.img === "world/new.webp", "fill-only sets missing portrait");
+  assert(fillMissing["prototypeToken.texture.src"] === "world/new_token.webp", "fill-only sets missing token");
+  assert(fillMissing["prototypeToken.name"] === "Newbie", "fill-only sets missing Known as");
+  assert(fillMissing["flags.ddbimporter.dndbeyond"]?.characterId === "42", "fill-only sets missing DDB");
 
   const metrics = {
     width: 4800,
