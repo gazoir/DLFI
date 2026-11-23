@@ -2,7 +2,7 @@
 
 .dlfi-modal,
 .dlfi-app {
-  min-width: min(720px, 92vw);
+  min-width: min(960px, 96vw);
 }
 
 .dlfi-tabs {
