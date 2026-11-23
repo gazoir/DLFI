@@ -182,6 +182,21 @@
   padding: 0.05rem 0.4rem;
 }
 
+.dlfi-session-row.is-new {
+  border-color: var(--color-text-hyperlink, #4aa8ff);
+}
+
+.dlfi-new-badge {
+  background: var(--color-text-hyperlink, #4aa8ff);
+  border-radius: 0.2rem;
+  color: #111;
+  font-size: 0.75em;
+  font-weight: 700;
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  text-transform: uppercase;
+}
+
 /* Sessions tab — 4-column scrollable grid */
 .dlfi-session-grid {
   display: grid;
