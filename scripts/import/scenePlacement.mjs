@@ -21,7 +21,12 @@ import {
   MODULE_ID,
   TOKEN_DISPOSITION
 } from "../constants.mjs";
-import { pickTokenTexture, tokenDisplayAlways, tokenDisplayHover } from "./tokenArt.mjs";
+import {
+  healthEstimateTokenFlags,
+  pickTokenTexture,
+  tokenDisplayAlways,
+  tokenDisplayHover
+} from "./tokenArt.mjs";
 
 /** Expo / world template placeholders: "Item 1" … "Item 5". */
 export const ITEM_PILE_PLACEHOLDER_NAME_RE = /^Item\s*\d+$/i;
@@ -1112,7 +1117,9 @@ export function layoutBattlemapRosterLines({
           [FLAG_SCOPE]: {
             kind: spec.kind,
             actorUuid: spec.actorUuid
-          }
+          },
+          // Battlemaps: Estimates visible on every token (party + enemies).
+          ...healthEstimateTokenFlags(false)
         }
       };
       if (spec.textureSrc) {
@@ -1248,7 +1255,9 @@ async function placeNpcsOnScene(scene, npcs, slots) {
             used: true,
             slot: token.name,
             actorUuid: actor.uuid
-          }
+          },
+          // Location / leftovers NPCs: hide Health Estimates from players.
+          ...healthEstimateTokenFlags(true)
         }
       });
       continue;
@@ -1266,7 +1275,10 @@ async function placeNpcsOnScene(scene, npcs, slots) {
       x: spacing * (index + 1),
       y: 80,
       ...(textureSrc ? { texture: { src: textureSrc } } : {}),
-      flags: { [FLAG_SCOPE]: { kind: "npc-overflow", actorUuid: actor.uuid } }
+      flags: {
+        [FLAG_SCOPE]: { kind: "npc-overflow", actorUuid: actor.uuid },
+        ...healthEstimateTokenFlags(true)
+      }
     });
   }
 
@@ -1306,7 +1318,9 @@ async function placePcsOnScene(scene, pcs, slots) {
           used: true,
           slot: token.name,
           actorUuid: actor.uuid
-        }
+        },
+        // Landing Page: hide Health Estimates from players.
+        ...healthEstimateTokenFlags(true)
       }
     });
   }
@@ -1349,7 +1363,8 @@ async function placePcsOnScene(scene, pcs, slots) {
         [FLAG_SCOPE]: {
           kind: "pc-overflow",
           actorUuid: actor.uuid
-        }
+        },
+        ...healthEstimateTokenFlags(true)
       }
     });
   }

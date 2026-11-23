@@ -798,6 +798,99 @@ for (const path of paths) {
   assert(layout.partyTokens[0].actorLink === true, "PC token linked");
   assert(layout.partyTokens[0].disposition === 1, "PC token disposition Friendly");
   assert(layout.partyTokens[0].displayName === 30, "party token Hovered by Anyone");
+  assert(
+    layout.enemyTokens[0].flags?.healthEstimate?.hideHealthEstimate === false,
+    "battlemap enemy Estimates visible"
+  );
+  assert(
+    layout.partyTokens[0].flags?.healthEstimate?.hideHealthEstimate === false,
+    "battlemap party Estimates visible"
+  );
+}
+
+// Health Estimate visibility by scene kind
+{
+  const { healthEstimateTokenFlags } = await import("./tokenArt.mjs");
+  assert(
+    healthEstimateTokenFlags(true).healthEstimate.hideHealthEstimate === true,
+    "hide flag for location/landing"
+  );
+  assert(
+    healthEstimateTokenFlags(false).healthEstimate.hideHealthEstimate === false,
+    "show flag for battlemap"
+  );
+
+  // Location NPC placement writes hide=true onto the token flags.
+  const npcUpdates = [];
+  const stubLoc = {
+    name: "📍 Loc",
+    width: 2000,
+    height: 1500,
+    drawings: { contents: [] },
+    tokens: {
+      contents: [
+        {
+          id: "tok1",
+          name: "1A1",
+          flags: { healthEstimate: { hideHealthEstimate: false } }
+        }
+      ]
+    },
+    async updateEmbeddedDocuments(type, docs) {
+      if (type === "Token") {
+        npcUpdates.push(...docs);
+      }
+    },
+    async deleteEmbeddedDocuments() {},
+    async createEmbeddedDocuments() {
+      return [];
+    }
+  };
+  // Re-use listNpcSlots via finalizeLocationScene
+  const { finalizeLocationScene } = await import("./scenePlacement.mjs");
+  await finalizeLocationScene(stubLoc, {
+    npcs: [{ actor: { id: "npc1", uuid: "Actor.npc1", name: "Garquillax", prototypeToken: {} } }],
+    skipItemPiles: true
+  });
+  assert(npcUpdates.length === 1, "location NPC token updated");
+  assert(
+    npcUpdates[0].flags?.healthEstimate?.hideHealthEstimate === true,
+    "location NPC Health Estimate hidden"
+  );
+
+  const pcUpdates = [];
+  const stubLanding = {
+    name: "Landing",
+    width: 1920,
+    height: 1080,
+    grid: { size: 100 },
+    drawings: { contents: [] },
+    tokens: {
+      contents: [
+        { id: "p1", name: "3P1", x: 10, y: 10, width: 1, height: 1, flags: {} },
+        { id: "p2", name: "3P2", x: 20, y: 10, width: 1, height: 1, flags: {} },
+        { id: "p3", name: "3P3", x: 30, y: 10, width: 1, height: 1, flags: {} }
+      ]
+    },
+    async updateEmbeddedDocuments(type, docs) {
+      if (type === "Token") {
+        pcUpdates.push(...docs);
+      }
+    },
+    async deleteEmbeddedDocuments() {},
+    async createEmbeddedDocuments() {
+      return [];
+    }
+  };
+  const { finalizeLandingScene } = await import("./scenePlacement.mjs");
+  await finalizeLandingScene(stubLanding, [
+    { actor: { id: "pc1", uuid: "Actor.pc1", name: "Ibby", prototypeToken: {} } }
+  ]);
+  assert(pcUpdates.length === 1, "landing PC token updated");
+  assert(
+    pcUpdates[0].flags?.healthEstimate?.hideHealthEstimate === true,
+    "landing PC Health Estimate hidden"
+  );
 }
 
 // Battlemap PC token uses knownAs, not full actor name
