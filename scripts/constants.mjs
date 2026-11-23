@@ -17,6 +17,11 @@ export const SETTING_SPELL_PACKS = "spellItemPacks";
 export const SETTING_LIVE_SESSION = "liveSessionKey";
 /** Delete the previous import of the same sessionCode (world docs + assets) before re-importing. */
 export const SETTING_REPLACE_ON_REIMPORT = "replaceOnReimport";
+/**
+ * When true, session-linked Player accounts may log in (role PLAYER).
+ * When false, Player-role accounts are soft-hidden (role NONE + `_` name prefix).
+ */
+export const SETTING_PLAYERS_UNLOCKED = "playersUnlocked";
 
 /** Keep this many zip copies per session under the DLCE inbox. */
 export const INBOX_KEEP_PER_SESSION = 3;

@@ -63,7 +63,6 @@ const {
 } = await import("./resolveLandingArt.mjs");
 const {
   findUserForSeat,
-  generateTempPassword,
   normalizeSeatEntry,
   seatsFromSessionPcs,
   softSeatPlayers,
@@ -1773,7 +1772,6 @@ for (const path of paths) {
 
 // Soft-seat player accounts
 {
-  assert(generateTempPassword(10).length === 10, "temp password length");
   assert(
     normalizeSeatEntry({
       actor: { flags: { dlfi: { playerName: "Alex", playerId: "p1" } } }
@@ -1851,28 +1849,66 @@ for (const path of paths) {
   const seats = seatsFromSessionPcs([{ actor, pc: { playerName: "Alex", playerId: "p_alex" } }]);
   const result = await softSeatPlayers(seats, {
     world,
-    UserDocument: FakeUser,
-    showPasswords: false
+    UserDocument: FakeUser
   });
-  assert(result.created.length === 1 && result.created[0].name === "Alex", "creates missing user");
+  assert(result.created.length === 1, "creates missing user");
   assert(createdPayload?.flags?.dlfi?.managed === true, "new user is managed");
   assert(createdPayload?.flags?.dlfi?.playerId === "p_alex", "new user stores playerId");
-  assert(createdPayload?.password?.length >= 8, "new user gets temp password");
-  assert(result.softHidden.some((row) => row.userId === "u_hide"), "soft-hides unused managed user");
-  assert(users.find((u) => u.id === "u_hide")?.role === USER_ROLE.NONE, "hidden role is NONE");
+  assert(createdPayload?.password === "", "new user gets blank password");
+  assert(createdPayload?.role === USER_ROLE.NONE, "new user starts locked (None) by default");
+  assert(String(createdPayload?.name ?? "").startsWith("_"), "new locked user gets _ name prefix");
   assert(actor.ownership.u_new === 3, "grants OWNER ownership");
   assert(users.find((u) => u.id === "u_new")?.character === "a_pc1", "sets user.character");
 
-  // Existing user: never wipe flags / password — only role/character.
+  // Existing user: never wipe flags / password — only character / playerId.
   const existingFlags = structuredClone(users[0].flags);
   await softSeatPlayers(
     [{ actor, playerName: "OldPlayer", playerId: "p_old" }],
-    { world, UserDocument: FakeUser, showPasswords: false }
+    { world, UserDocument: FakeUser }
   );
   assert(
     JSON.stringify(users[0].flags) === JSON.stringify(existingFlags),
     "existing user flags preserved on re-seat"
   );
+
+  const {
+    lockPlayersLogin,
+    unlockPlayersLogin,
+    withLockedNamePrefix,
+    stripLockedNamePrefix
+  } = await import("./softSeatPlayers.mjs");
+  assert(withLockedNamePrefix("Sam") === "_Sam", "lock prefix adds underscore");
+  assert(stripLockedNamePrefix("_Sam") === "Sam", "strip lock prefix");
+  assert(stripLockedNamePrefix("Sam") === "Sam", "strip no-op without prefix");
+
+  // Seed a Player-role user to lock.
+  users.push({
+    id: "u_player",
+    name: "Sam",
+    role: USER_ROLE.PLAYER,
+    isGM: false,
+    character: null,
+    flags: { dlfi: { managed: true, playerId: "p_sam" } },
+    async update(patch) {
+      Object.assign(this, patch);
+    }
+  });
+  const lockWorld = {
+    users,
+    actors: [
+      {
+        id: "a_pc1",
+        type: "character",
+        flags: { dlfi: { playerId: "p_sam", playerName: "Sam" } }
+      }
+    ]
+  };
+  await lockPlayersLogin({ world: lockWorld });
+  assert(users.find((u) => u.id === "u_player")?.role === USER_ROLE.NONE, "lock sets Player → None");
+  assert(users.find((u) => u.id === "u_player")?.name === "_Sam", "lock prepends _");
+  await unlockPlayersLogin({ world: lockWorld });
+  assert(users.find((u) => u.id === "u_player")?.role === USER_ROLE.PLAYER, "unlock restores Player");
+  assert(users.find((u) => u.id === "u_player")?.name === "Sam", "unlock strips _");
 }
 
 if (failures) {

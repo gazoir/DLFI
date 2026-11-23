@@ -1,15 +1,15 @@
 /**
  * Soft-seat Foundry Users from seated PC Actor flags / package PC entries.
  *
- * On session Activate (and after Import that activates):
- * - Upsert Users matched by flags.dlfi.playerId, else by name
- * - New Users get a one-time temp password (shown once to the GM)
- * - Existing Users: only role / character / ownership — never wipe flags,
+ * On session Activate / Import:
+ * - Upsert Users matched by flags.dlfi.playerId, else by name (with optional `_` prefix)
+ * - New Users get a blank password (GM sets passwords in User Config)
+ * - Existing Users: only character / ownership / flags.playerId — never wipe
  *   password, hotbar, or dice-so-nice settings
- * - Soft-hide: previously managed Users not in this seat list → role NONE
+ * - Login visibility is gated by the toolbar 🔒/🔓 lock (not auto-hidden on activate)
  */
 
-import { FLAG_SCOPE, MODULE_ID, notify } from "../constants.mjs";
+import { FLAG_SCOPE, MODULE_ID, notify, SETTING_PLAYERS_UNLOCKED, setSetting, setting } from "../constants.mjs";
 
 /** Foundry CONST.USER_ROLES — numeric so Node selftests work offline. */
 export const USER_ROLE = Object.freeze({
@@ -23,21 +23,31 @@ export const USER_ROLE = Object.freeze({
 /** Foundry CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER */
 export const OWNERSHIP_OWNER = 3;
 
+/** Prefix applied to Player-role names when the login gate is locked. */
+export const LOCKED_NAME_PREFIX = "_";
+
 /**
- * @param {number} [length]
+ * @param {string|null|undefined} name
  * @returns {string}
  */
-export function generateTempPassword(length = 12) {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  const bytes =
-    typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function"
-      ? crypto.getRandomValues(new Uint8Array(length))
-      : Uint8Array.from({ length }, () => Math.floor(Math.random() * 256));
-  let out = "";
-  for (let i = 0; i < length; i += 1) {
-    out += alphabet[bytes[i] % alphabet.length];
+export function stripLockedNamePrefix(name) {
+  const text = String(name ?? "").trim();
+  if (text.startsWith(LOCKED_NAME_PREFIX) && text.length > 1) {
+    return text.slice(1);
   }
-  return out;
+  return text;
+}
+
+/**
+ * @param {string|null|undefined} name
+ * @returns {string}
+ */
+export function withLockedNamePrefix(name) {
+  const text = String(name ?? "").trim();
+  if (!text || text.startsWith(LOCKED_NAME_PREFIX)) {
+    return text;
+  }
+  return `${LOCKED_NAME_PREFIX}${text}`;
 }
 
 /**
@@ -90,7 +100,7 @@ export function seatsFromSessionPcs(sessionPcs = []) {
 }
 
 /**
- * Find an existing User by DLFI playerId flag first, else exact name.
+ * Find an existing User by DLFI playerId flag first, else exact name (with/without `_`).
  * @param {Iterable<object>} users
  * @param {{ playerId?: string|null, playerName?: string|null }} seat
  */
@@ -104,34 +114,39 @@ export function findUserForSeat(users, seat) {
     }
   }
   const name = seat?.playerName ? String(seat.playerName).trim() : "";
-  if (name) {
-    return list.find((user) => String(user.name ?? "").trim() === name) ?? null;
+  if (!name) {
+    return null;
   }
-  return null;
+  const locked = withLockedNamePrefix(name);
+  return (
+    list.find((user) => {
+      const userName = String(user.name ?? "").trim();
+      return userName === name || userName === locked || stripLockedNamePrefix(userName) === name;
+    }) ?? null
+  );
 }
 
 /**
- * Soft-seat Users for the given PC seats.
+ * Soft-seat Users for the given PC seats (ownership + character; create if missing).
+ * Does not change login visibility — use lockPlayersLogin / unlockPlayersLogin for that.
  *
  * @param {Array<{ actor?: object|null, pc?: object|null, playerId?: string|null, playerName?: string|null }>} seatEntries
- * @param {{ world?: object, UserDocument?: typeof User, showPasswords?: boolean }} [options]
+ * @param {{ world?: object, UserDocument?: typeof User, unlockSessionPlayers?: boolean }} [options]
  * @returns {Promise<{
- *   created: Array<{ userId: string, name: string, password: string }>,
+ *   created: Array<{ userId: string, name: string }>,
  *   updated: Array<{ userId: string, name: string }>,
- *   softHidden: Array<{ userId: string, name: string }>,
  *   seatedUserIds: string[]
  * }>}
  */
 export async function softSeatPlayers(seatEntries = [], options = {}) {
   const world = options.world ?? globalThis.game;
   const UserDocument = options.UserDocument ?? globalThis.User;
-  const showPasswords = options.showPasswords !== false;
+  const unlockSessionPlayers = options.unlockSessionPlayers === true;
   const seats = seatEntries.map(normalizeSeatEntry).filter(Boolean);
 
   const result = {
     created: [],
     updated: [],
-    softHidden: [],
     seatedUserIds: []
   };
 
@@ -142,41 +157,47 @@ export async function softSeatPlayers(seatEntries = [], options = {}) {
   const seatedUserIds = new Set();
 
   for (const seat of seats) {
-    const name = String(seat.playerName || "").trim() || `Player ${seat.playerId}`;
+    const displayName = String(seat.playerName || "").trim() || `Player ${seat.playerId}`;
     let user = findUserForSeat(world.users, seat);
     if (!user) {
       if (!UserDocument?.create) {
-        console.warn(`${MODULE_ID} | User.create unavailable — skip soft-seat for ${name}`);
+        console.warn(`${MODULE_ID} | User.create unavailable — skip soft-seat for ${displayName}`);
         continue;
       }
-      const password = generateTempPassword();
       const flags = { [FLAG_SCOPE]: { managed: true } };
       if (seat.playerId) {
         flags[FLAG_SCOPE].playerId = String(seat.playerId);
       }
+      // Blank password — GM sets passwords in User Config. Role follows lock state.
+      const unlocked = unlockSessionPlayers || isPlayersUnlocked(world);
       user = await UserDocument.create({
-        name,
-        role: USER_ROLE.PLAYER,
-        password,
+        name: unlocked ? displayName : withLockedNamePrefix(displayName),
+        role: unlocked ? USER_ROLE.PLAYER : USER_ROLE.NONE,
+        password: "",
         flags
       });
       result.created.push({
         userId: user.id,
-        name: user.name,
-        password
+        name: user.name
       });
     } else {
       const patch = {};
-      if (user.role === USER_ROLE.NONE || user.role === USER_ROLE.PLAYER) {
-        if (user.role !== USER_ROLE.PLAYER) {
-          patch.role = USER_ROLE.PLAYER;
-        }
-      }
-      // Only attach playerId when missing; never wipe other flags.
-      // Only attach playerId when missing; never wipe other flags / managed state
-      // on pre-existing manual accounts.
       if (seat.playerId && !user.flags?.[FLAG_SCOPE]?.playerId) {
         patch[`flags.${FLAG_SCOPE}.playerId`] = String(seat.playerId);
+      }
+      if (!user.flags?.[FLAG_SCOPE]?.managed) {
+        patch[`flags.${FLAG_SCOPE}.managed`] = true;
+      }
+      if (unlockSessionPlayers || isPlayersUnlocked(world)) {
+        if (user.role === USER_ROLE.NONE || user.role === USER_ROLE.PLAYER) {
+          if (user.role !== USER_ROLE.PLAYER) {
+            patch.role = USER_ROLE.PLAYER;
+          }
+          const stripped = stripLockedNamePrefix(user.name);
+          if (stripped !== user.name) {
+            patch.name = stripped;
+          }
+        }
       }
       if (Object.keys(patch).length) {
         await user.update(patch);
@@ -191,45 +212,22 @@ export async function softSeatPlayers(seatEntries = [], options = {}) {
 
     if (seat.actor?.id) {
       await grantActorOwnership(seat.actor, user.id);
-      if (user.character !== seat.actor.id) {
+      const characterId = user.character?.id ?? user.character ?? null;
+      if (characterId !== seat.actor.id) {
         await user.update({ character: seat.actor.id });
       }
     }
   }
 
-  // Soft-hide managed Users not in this session's seat list (do not delete).
-  for (const user of [...(world.users ?? [])]) {
-    if (!user?.flags?.[FLAG_SCOPE]?.managed) {
-      continue;
-    }
-    if (user.isGM || user.role >= USER_ROLE.ASSISTANT) {
-      continue;
-    }
-    if (seatedUserIds.has(user.id)) {
-      continue;
-    }
-    if (user.role !== USER_ROLE.NONE) {
-      await user.update({ role: USER_ROLE.NONE });
-      result.softHidden.push({ userId: user.id, name: user.name });
-    }
-  }
-
   result.seatedUserIds = [...seatedUserIds];
 
-  if (showPasswords && result.created.length) {
-    await alertTempPasswords(result.created);
-  }
-
-  if (result.created.length || result.softHidden.length || result.updated.length) {
+  if (result.created.length || result.updated.length) {
     const parts = [];
     if (result.created.length) {
       parts.push(`created ${result.created.length} player account(s)`);
     }
     if (result.updated.length) {
       parts.push(`updated ${result.updated.length}`);
-    }
-    if (result.softHidden.length) {
-      parts.push(`hid ${result.softHidden.length} unused managed account(s)`);
     }
     const summary = `Soft-seat: ${parts.join(", ")}.`;
     if (globalThis.ui?.notifications) {
@@ -245,7 +243,7 @@ export async function softSeatPlayers(seatEntries = [], options = {}) {
 /**
  * Soft-seat from an already-imported session's PC actors.
  * @param {object} sessionDocs collectSessionDocuments result
- * @param {{ world?: object, showPasswords?: boolean }} [options]
+ * @param {{ world?: object, unlockSessionPlayers?: boolean }} [options]
  */
 export async function softSeatPlayersFromSessionDocs(sessionDocs, options = {}) {
   return softSeatPlayers(seatsFromPcActors(sessionDocs?.pcs ?? []), options);
@@ -254,10 +252,131 @@ export async function softSeatPlayersFromSessionDocs(sessionDocs, options = {}) 
 /**
  * Soft-seat from import-time session PC pairs.
  * @param {Array<{ actor: object, pc?: object }>} sessionPcs
- * @param {{ world?: object, showPasswords?: boolean }} [options]
+ * @param {{ world?: object, unlockSessionPlayers?: boolean }} [options]
  */
 export async function softSeatPlayersFromImport(sessionPcs, options = {}) {
   return softSeatPlayers(seatsFromSessionPcs(sessionPcs), options);
+}
+
+/**
+ * @param {object} [world]
+ * @returns {boolean}
+ */
+export function isPlayersUnlocked(world = globalThis.game) {
+  try {
+    if (typeof setting === "function") {
+      return setting(SETTING_PLAYERS_UNLOCKED) === true;
+    }
+  } catch (_error) {
+    /* settings unavailable in Node selftests */
+  }
+  try {
+    return world?.settings?.get?.(MODULE_ID, SETTING_PLAYERS_UNLOCKED) === true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+/**
+ * Lock the login gate: every USER_ROLES.PLAYER → NONE + `_` name prefix.
+ * Does not touch TRUSTED / ASSISTANT / GM.
+ *
+ * @param {{ world?: object }} [options]
+ */
+export async function lockPlayersLogin(options = {}) {
+  const world = options.world ?? globalThis.game;
+  const locked = [];
+  for (const user of [...(world?.users ?? [])]) {
+    if (user?.isGM || user?.role !== USER_ROLE.PLAYER) {
+      continue;
+    }
+    const patch = { role: USER_ROLE.NONE };
+    const nextName = withLockedNamePrefix(user.name);
+    if (nextName !== user.name) {
+      patch.name = nextName;
+    }
+    await user.update(patch);
+    locked.push({ userId: user.id, name: nextName });
+  }
+  try {
+    await setSetting(SETTING_PLAYERS_UNLOCKED, false);
+  } catch (_error) {
+    /* Node selftests */
+  }
+  const summary = locked.length
+    ? `Players locked: hid ${locked.length} Player account(s) (role None, _ name).`
+    : "Players locked (no Player-role accounts to hide).";
+  if (globalThis.ui?.notifications) {
+    notify(summary);
+  } else {
+    console.log(`${MODULE_ID} | ${summary}`);
+  }
+  return { locked };
+}
+
+/**
+ * Unlock the login gate: session-linked Users → PLAYER and strip leading `_`.
+ *
+ * Pass `options.seats` for the live session when available; otherwise any
+ * character Actor with playerId/playerName flags (Damned Lucky party).
+ *
+ * @param {{ world?: object, seats?: Array<object> }} [options]
+ */
+export async function unlockPlayersLogin(options = {}) {
+  const world = options.world ?? globalThis.game;
+  const seats =
+    options.seats ??
+    seatsFromPcActors(
+      [...(world?.actors ?? [])].filter((actor) => actor?.type === "character")
+    );
+  const unlocked = [];
+  const seatedIds = new Set();
+
+  for (const seat of seats.map(normalizeSeatEntry).filter(Boolean)) {
+    const user = findUserForSeat(world?.users ?? [], seat);
+    if (!user) {
+      continue;
+    }
+    if (user.isGM || user.role >= USER_ROLE.TRUSTED) {
+      continue;
+    }
+    seatedIds.add(user.id);
+    const patch = { role: USER_ROLE.PLAYER };
+    const stripped = stripLockedNamePrefix(user.name);
+    if (stripped !== user.name) {
+      patch.name = stripped;
+    }
+    await user.update(patch);
+    unlocked.push({ userId: user.id, name: patch.name ?? user.name });
+  }
+
+  try {
+    await setSetting(SETTING_PLAYERS_UNLOCKED, true);
+  } catch (_error) {
+    /* Node selftests */
+  }
+  const summary = unlocked.length
+    ? `Players unlocked: ${unlocked.length} session account(s) set to Player.`
+    : "Players unlocked (no session-linked accounts found).";
+  if (globalThis.ui?.notifications) {
+    notify(summary);
+  } else {
+    console.log(`${MODULE_ID} | ${summary}`);
+  }
+  return { unlocked, seatedUserIds: [...seatedIds] };
+}
+
+/**
+ * Toggle the login gate. Returns the new unlocked state.
+ * @param {{ world?: object }} [options]
+ */
+export async function togglePlayersLoginLock(options = {}) {
+  if (isPlayersUnlocked(options.world)) {
+    await lockPlayersLogin(options);
+    return false;
+  }
+  await unlockPlayersLogin(options);
+  return true;
 }
 
 /**
@@ -321,6 +440,17 @@ export async function updateManagedUser(userId, patch = {}, options = {}) {
   const update = {};
   if (typeof patch.playable === "boolean") {
     update.role = patch.playable ? USER_ROLE.PLAYER : USER_ROLE.NONE;
+    if (patch.playable) {
+      const stripped = stripLockedNamePrefix(user.name);
+      if (stripped !== user.name) {
+        update.name = stripped;
+      }
+    } else {
+      const locked = withLockedNamePrefix(user.name);
+      if (locked !== user.name) {
+        update.name = locked;
+      }
+    }
   }
   if ("characterId" in patch) {
     update.character = patch.characterId || null;
@@ -339,49 +469,6 @@ export async function updateManagedUser(userId, patch = {}, options = {}) {
   return user;
 }
 
-/**
- * @param {Array<{ name: string, password: string }>} created
- */
-export async function alertTempPasswords(created = []) {
-  if (!created.length) {
-    return;
-  }
-  const rows = created
-    .map(
-      (row) =>
-        `<tr><td><strong>${escapeHtml(row.name)}</strong></td><td><code>${escapeHtml(row.password)}</code></td></tr>`
-    )
-    .join("");
-  const content =
-    `<p>These player accounts were created with a one-time temporary password. ` +
-    `Copy them now — they will not be shown again.</p>` +
-    `<table class="dlfi-password-table"><thead><tr><th>Player</th><th>Temp password</th></tr></thead>` +
-    `<tbody>${rows}</tbody></table>`;
-
-  const DialogV2 = globalThis.foundry?.applications?.api?.DialogV2;
-  if (DialogV2?.prompt) {
-    await DialogV2.prompt({
-      window: { title: "New player passwords" },
-      content,
-      ok: { label: "Got it" }
-    });
-    return;
-  }
-  if (typeof globalThis.Dialog?.prompt === "function") {
-    await globalThis.Dialog.prompt({
-      title: "New player passwords",
-      content,
-      label: "Got it",
-      callback: () => undefined
-    });
-    return;
-  }
-  console.warn(
-    `${MODULE_ID} | new player passwords:`,
-    created.map((row) => `${row.name}=${row.password}`).join(", ")
-  );
-}
-
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (value == null) {
@@ -393,12 +480,4 @@ function firstNonEmpty(...values) {
     }
   }
   return null;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }

@@ -11,6 +11,7 @@ import {
   SETTING_IMPORTS,
   SETTING_INBOX,
   SETTING_LIVE_SESSION,
+  SETTING_PLAYERS_UNLOCKED,
   SETTING_REPLACE_ON_REIMPORT,
   SETTING_SPELL_PACKS,
   SETTING_TEMPLATE_BATTLEMAP,
@@ -19,9 +20,22 @@ import {
   SETTING_TEMPLATE_LOCATION,
   setting
 } from "./constants.mjs";
+import { registerHideLandingEffectsHooks } from "./canvas/hideLandingEffects.mjs";
 import { ensureDataFolder } from "./package/dataFolders.mjs";
 import { ensureInboxRoot } from "./package/inbox.mjs";
+import { liveSessionPcActors } from "./import/sessions.mjs";
+import {
+  isPlayersUnlocked,
+  lockPlayersLogin,
+  seatsFromPcActors,
+  unlockPlayersLogin
+} from "./import/softSeatPlayers.mjs";
 import { openDamnedLuckyApp } from "./ui/DamnedLuckyApp.mjs";
+
+async function unlockLiveSessionPlayers() {
+  const seats = seatsFromPcActors(liveSessionPcActors());
+  await unlockPlayersLogin({ seats });
+}
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, SETTING_INBOX, {
@@ -104,6 +118,15 @@ Hooks.once("init", () => {
     default: true
   });
 
+  game.settings.register(MODULE_ID, SETTING_PLAYERS_UNLOCKED, {
+    name: "Player login gate unlocked",
+    hint: "When locked (toolbar 🔒), Player-role accounts are set to None with a _ name prefix. Trusted Player / GM are untouched.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false
+  });
+
   game.settings.registerMenu(MODULE_ID, "openDamnedLucky", {
     name: "Damned Lucky",
     label: "Open Damned Lucky",
@@ -118,6 +141,7 @@ Hooks.once("ready", () => {
   console.log(
     `${MODULE_ID} | ready (packageFormatVersion ${PACKAGE_FORMAT_VERSION}). Open Damned Lucky from scene controls or Configure Settings.`
   );
+  registerHideLandingEffectsHooks();
   // Create storage roots so Refresh / Import do not fail on a missing folder.
   void (async () => {
     try {
@@ -139,11 +163,23 @@ Hooks.on("getSceneControlButtons", (controls) => {
     return;
   }
 
+  const isGm = Boolean(game.user?.isGM);
+  const unlocked = isPlayersUnlocked();
+  const lockTitle = unlocked
+    ? "Players unlocked — click to lock (hide Player accounts)"
+    : "Players locked — click to unlock session players";
+  const lockIcon = unlocked ? "fa-solid fa-lock-open" : "fa-solid fa-lock";
+
   if (controls.dlfi) {
+    // Refresh lock tool title/icon when controls rebuild.
+    if (controls.dlfi.tools?.playersLock) {
+      controls.dlfi.tools.playersLock.title = lockTitle;
+      controls.dlfi.tools.playersLock.icon = lockIcon;
+      controls.dlfi.tools.playersLock.active = unlocked;
+    }
     return;
   }
 
-  const isGm = Boolean(game.user?.isGM);
   controls.dlfi = {
     name: "dlfi",
     title: "Damned Lucky",
@@ -170,6 +206,26 @@ Hooks.on("getSceneControlButtons", (controls) => {
           }
           openDamnedLuckyApp();
         }
+      },
+      playersLock: {
+        name: "playersLock",
+        title: lockTitle,
+        icon: lockIcon,
+        order: 1,
+        button: true,
+        toggle: true,
+        active: unlocked,
+        visible: isGm,
+        onChange: async (_event, active) => {
+          // Foundry may pass the new toggle state; drive from desired outcome.
+          if (active) {
+            await unlockLiveSessionPlayers();
+          } else {
+            await lockPlayersLogin();
+          }
+          // Force scene controls to rebuild so the icon/title refresh.
+          ui.controls?.initialize?.();
+        }
       }
     }
   };
@@ -180,16 +236,34 @@ function registerLegacySceneControl(controls) {
     return;
   }
   const notes = controls.find((control) => control.name === "notes") ?? controls[0];
-  if (!notes?.tools || notes.tools.some?.((tool) => tool.name === "dlfi")) {
+  if (!notes?.tools) {
     return;
   }
-  notes.tools.push({
-    name: "dlfi",
-    title: "Damned Lucky",
-    icon: "fas fa-dungeon",
-    button: true,
-    onClick: () => openDamnedLuckyApp()
-  });
+  if (!notes.tools.some?.((tool) => tool.name === "dlfi")) {
+    notes.tools.push({
+      name: "dlfi",
+      title: "Damned Lucky",
+      icon: "fas fa-dungeon",
+      button: true,
+      onClick: () => openDamnedLuckyApp()
+    });
+  }
+  if (!notes.tools.some?.((tool) => tool.name === "dlfi-players-lock")) {
+    notes.tools.push({
+      name: "dlfi-players-lock",
+      title: "Toggle player login lock",
+      icon: isPlayersUnlocked() ? "fas fa-lock-open" : "fas fa-lock",
+      button: true,
+      onClick: async () => {
+        if (isPlayersUnlocked()) {
+          await lockPlayersLogin();
+        } else {
+          await unlockLiveSessionPlayers();
+        }
+        ui.controls?.initialize?.();
+      }
+    });
+  }
 }
 
 
