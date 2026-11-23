@@ -2,8 +2,9 @@
  * Build a dnd5e character Actor stub from the bundled PC template,
  * ready for D&D Beyond Importer sync.
  *
- * Overwrites: Actor name (full PC name), DDB flags, portrait, prototype
- * token (Known as + Hovered by Anyone + package token art).
+ * Overwrites: Actor name (Known as), DDB flags, portrait, prototype
+ * token (Known as + Hovered by Anyone + package token art). Full legal
+ * name is kept on `flags.dlfi.fullName`.
  */
 
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
@@ -97,7 +98,7 @@ export function buildPcActorData(pc, media = {}) {
   delete base._stats;
   stripEmbeddedIds(base);
 
-  base.name = name;
+  base.name = knownAs;
   base.type = "character";
   base.img = portrait || base.img || DEFAULT_PC_ART;
   base.folder = media.folderId ?? null;
@@ -161,6 +162,7 @@ export function buildPcActorData(pc, media = {}) {
       ddbId,
       ddbUrl,
       knownAs,
+      fullName: name,
       playerName: pc?.playerName ?? null,
       importKey: media.importKey ?? null,
       source: "dlce-pc-stub"
@@ -172,7 +174,9 @@ export function buildPcActorData(pc, media = {}) {
 
 /**
  * Fill-only patch for an existing matched PC actor (art / DDB / Known as).
- * Always refreshes Friendly disposition + Hovered-by-Anyone nameplate.
+ * Package portrait/token always win when provided (over DDB/default art).
+ * Always refreshes Known as on the prototype token, Friendly disposition,
+ * and Hovered-by-Anyone nameplate.
  *
  * @param {Actor} actor
  * @param {object} pc
@@ -183,29 +187,39 @@ export function buildExistingPcFillPatch(actor, pc, media = {}) {
   const patch = {};
   const portrait = media.portrait || null;
   const token = media.token || null;
+  const fullName = String(pc?.name || "").trim() || null;
   const knownAs =
     String(pc?.knownAs || "").trim() ||
     String(pc?.name || actor?.name || "")
       .trim()
       .split(/\s+/)[0] ||
     actor?.name;
+  const scaleRaw = media.tokenScale ?? pc?.tokenScale;
+  const tokenScale = Number(scaleRaw);
+  const hasTokenScale = Number.isFinite(tokenScale) && tokenScale > 0;
 
-  if (portrait && isMissingPcArt(actor?.img)) {
+  if (knownAs) {
+    patch.name = knownAs;
+    patch["prototypeToken.name"] = knownAs;
+    patch[`flags.${FLAG_SCOPE}.knownAs`] = knownAs;
+  }
+  if (fullName) {
+    patch[`flags.${FLAG_SCOPE}.fullName`] = fullName;
+  }
+
+  if (portrait) {
     patch.img = portrait;
   }
 
-  const currentTokenSrc = actor?.prototypeToken?.texture?.src;
-  if (token && isMissingPcArt(currentTokenSrc)) {
+  if (token) {
     patch["prototypeToken.texture.src"] = token;
-    if (pc?.tokenScale != null && Number(pc.tokenScale) > 0) {
-      patch["prototypeToken.texture.scaleX"] = Number(pc.tokenScale);
-      patch["prototypeToken.texture.scaleY"] = Number(pc.tokenScale);
+    if (hasTokenScale) {
+      patch["prototypeToken.texture.scaleX"] = tokenScale;
+      patch["prototypeToken.texture.scaleY"] = tokenScale;
     }
-  }
-
-  const tokenName = String(actor?.prototypeToken?.name ?? "").trim();
-  if (knownAs && !tokenName) {
-    patch["prototypeToken.name"] = knownAs;
+  } else if (portrait) {
+    // Portrait-only package: still prefer package art over DDB/default token.
+    patch["prototypeToken.texture.src"] = portrait;
   }
 
   if (!actorHasDdbLink(actor)) {

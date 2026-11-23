@@ -33,7 +33,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
     id: "dlfi-damned-lucky",
     classes: ["dlfi-modal"],
-    position: { width: 960, height: "auto" },
+    position: { width: 1200, height: "auto" },
     window: {
       title: "Damned Lucky",
       resizable: true
