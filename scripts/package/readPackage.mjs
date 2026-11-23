@@ -1,4 +1,5 @@
 import { MODULE_ID, PACKAGE_FORMAT_VERSIONS, notify } from "../constants.mjs";
+import { resolveSessionThumbPackagePath } from "../import/resolveLandingArt.mjs";
 import { getFilePicker } from "./filePicker.mjs";
 import { normalizePackageFiles, readStoreZip } from "./storeZip.mjs";
 
@@ -143,6 +144,10 @@ export function groupPackagesBySession(loaded) {
       String(b.package.manifest.exportedAt).localeCompare(String(a.package.manifest.exportedAt))
     );
     const latest = versions[0];
+    const thumbPackagePath = resolveSessionThumbPackagePath(
+      latest.package.manifest,
+      latest.package.files
+    );
     sessions.push({
       sessionCode,
       displayCode: latest.package.manifest.displayCode,
@@ -150,6 +155,7 @@ export function groupPackagesBySession(loaded) {
       partyLevel: latest.package.manifest.partyLevel,
       crLabel: latest.package.manifest.crLabel ?? null,
       sessionArt: latest.package.manifest.sessionArt ?? null,
+      thumbPackagePath,
       latestExportedAt: latest.package.manifest.exportedAt,
       versions
     });

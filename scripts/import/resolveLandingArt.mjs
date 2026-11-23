@@ -158,6 +158,87 @@ export function resolveLandingPageArt(manifest, uploaded) {
 }
 
 /**
+ * Pick the best package-relative path for a session thumbnail / inbox preview.
+ * Prefers Landing Clean, then Logo_Burn, then legacy sessionArt.
+ *
+ * @param {object} manifest
+ * @param {Map<string, unknown>|Iterable<string>} [filesOrPaths] package file map or path list
+ * @returns {string|null}
+ */
+export function resolveSessionThumbPackagePath(manifest, filesOrPaths = []) {
+  /** @type {Map<string, string>} */
+  const fakeUploaded = new Map();
+  const paths =
+    filesOrPaths instanceof Map
+      ? [...filesOrPaths.keys()]
+      : Array.isArray(filesOrPaths)
+        ? filesOrPaths
+        : [...(filesOrPaths ?? [])];
+
+  const addPath = (raw) => {
+    if (typeof raw !== "string" || !raw.trim()) {
+      return;
+    }
+    const packagePath = raw.replace(/^\/+/, "").replace(/\\/g, "/");
+    if (packagePath) {
+      fakeUploaded.set(packagePath, packagePath);
+    }
+  };
+
+  for (const raw of paths) {
+    const packagePath = String(raw || "")
+      .replace(/^\/+/, "")
+      .replace(/\\/g, "/");
+    if (!packagePath || !IMAGE_EXT.test(packagePath)) {
+      continue;
+    }
+    const inLanding = LANDING_PAGE_FOLDER_RE.test(packagePath);
+    const inSession = /^assets\/(session|landing)\b/i.test(packagePath);
+    if (inLanding || inSession) {
+      fakeUploaded.set(packagePath, packagePath);
+    }
+  }
+
+  const namedLanding = asObject(manifest?.landingPage) ?? {};
+  for (const key of ["clean", "raw", "session", "logoBurn", "logo_burn", "burn", "logoOnly", "titleOnly"]) {
+    addPath(namedLanding[key]);
+  }
+  addPath(manifest?.sessionArt);
+
+  const art = resolveLandingPageArt(manifest, fakeUploaded);
+  return (
+    art.packagePaths?.clean ||
+    art.packagePaths?.logoBurn ||
+    (manifest?.sessionArt
+      ? String(manifest.sessionArt).replace(/^\/+/, "").replace(/\\/g, "/")
+      : null) ||
+    null
+  );
+}
+
+/**
+ * World / Data path for an imported session's artwork tile (Landing Clean preferred).
+ * @param {object|null|undefined} landingScene
+ * @returns {string|null}
+ */
+export function resolveImportedSessionThumbUrl(landingScene) {
+  if (!landingScene) {
+    return null;
+  }
+  const candidates = [
+    landingScene.background?.src,
+    landingScene.img,
+    landingScene.flags?.dlfi?.thumbUrl
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+}
+
+/**
  * Classify a Landing scene tile as logoOnly / titleOnly via name or texture src.
  * @param {object} tile
  * @returns {"logoOnly"|"titleOnly"|null}

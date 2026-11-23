@@ -57,6 +57,7 @@ import {
   isItemPilesActive,
   itemPilesDetectionDebug
 } from "./scenePlacement.mjs";
+import { softSeatPlayersFromImport } from "./softSeatPlayers.mjs";
 import {
   buildMsdSceneSequence,
   formatSceneDmName
@@ -1005,6 +1006,13 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   await setSetting(SETTING_LIVE_SESSION, sessionKey(manifest));
+
+  try {
+    progress("soft-seat player accounts", { seated: sessionPcs.length });
+    await softSeatPlayersFromImport(sessionPcs);
+  } catch (error) {
+    console.warn(`${MODULE_ID} | soft-seat after import failed`, error);
+  }
 
   if (pcsMissingDdb.length) {
     await alertPcStubResults({

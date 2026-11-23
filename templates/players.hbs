@@ -1,0 +1,34 @@
+<section class="dlfi-app dlfi-players-app">
+  <p class="notes">Soft-seated player accounts. Toggle Playable / Hidden (role PLAYER vs NONE). Assign a PC — ownership is granted automatically. Accounts are never deleted here.</p>
+  <div class="dlfi-toolbar">
+    <button type="button" data-action="refreshPlayers" {{#if busy}}disabled{{/if}}>Refresh</button>
+  </div>
+  {{#if status}}<p class="dlfi-status">{{status}}</p>{{/if}}
+
+  {{#unless hasUsers}}
+    <p class="notes">No player accounts yet. Activate a session with seated PCs that have <code>playerName</code> / <code>playerId</code> to create managed Users.</p>
+  {{else}}
+  <ul class="dlfi-players-list">
+    {{#each users}}
+    <li class="dlfi-player-row{{#unless playable}} is-hidden{{/unless}}">
+      <div class="dlfi-player-main">
+        <strong>{{name}}</strong>
+        <span class="dlfi-role-badge">{{roleLabel}}</span>
+        {{#if managed}}<span class="notes">managed</span>{{/if}}
+      </div>
+      <label class="dlfi-player-pc">
+        Assigned PC
+        <select data-user-id="{{id}}" class="dlfi-player-pc-select" {{#if ../busy}}disabled{{/if}}>
+          <option value="">— none —</option>
+          {{#each characters}}
+          <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+          {{/each}}
+        </select>
+      </label>
+      <button type="button" data-action="togglePlayable" data-user-id="{{id}}" data-playable="{{playable}}"
+        {{#if ../busy}}disabled{{/if}}>{{#if playable}}Hide{{else}}Show{{/if}}</button>
+    </li>
+    {{/each}}
+  </ul>
+  {{/unless}}
+</section>

@@ -4,12 +4,14 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.35`)
+## Status (`0.1.36`)
 
 Working in this slice:
 
-- **Damned Lucky** top-level scene control (+ Configure Settings menu) → modal tabs Sessions | Import | Pack
-- **Import**: scan `Data/dlce-inbox` (setting), list sessions by latest export date, version dropdown, Load
+- **Damned Lucky** top-level scene control (+ Configure Settings menu) → modal tabs Sessions (default) | Import | Pack, plus **Players**
+- **Sessions**: 4-column artwork grid (Landing Clean / session art), Activate soft-seats players, select/delete from tiles
+- **Soft-seat Players**: on Activate / Import, upsert Foundry Users from `flags.dlfi.playerId` / `playerName` (managed accounts, one-time temp passwords, hide unused with role NONE — never delete); Players UI assigns PC + Show/Hide
+- **Import**: scan `Data/dlce-inbox` (setting), list sessions by latest export date with Landing/session thumbnails, version dropdown, Load; path frames below the list; modal ~960px
 - **Choose zip…** for a local DLCE export without the inbox
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
 - Uploads package assets under `Data/dlfi-imports/…` (plus top-level `Landing Page/` slides)
@@ -37,6 +39,7 @@ Working in this slice:
 - **0.1.24:** PC tokens Friendly; location NPC tokens Neutral (combat enemies stay Hostile)
 - **0.1.25:** Melee attacks pick DEX when to-hit matches DEX+prof (fixes Imp Sting +10); warn when to-hit is wild for CR
 - **0.1.26:** Battlemap PC tokens use Known as + Hovered by Anyone (default prototype too)
+- **0.1.36:** Soft-seat player accounts on Activate/Import; Players UI; Sessions default tab + 4-wide art grid; inbox Landing Clean thumbs; Import paths below list; modal ~960px; store `pcs[].playerId` on Actor flags
 - **0.1.35:** Damned Lucky modal 1200px + row overflow fixes; PC Actor name = Known as; fill-only always applies package portrait/token over DDB art
 - **0.1.34:** Widen Damned Lucky modal (960px) so Import path/session rows fit without scrollbars
 - **0.1.33:** DialogV2 when Session Package has 0 seated PCs (empty Damned Lucky / no Landing party tokens) with re-export instructions

@@ -17,6 +17,8 @@ import {
 import { setExclusiveSceneNavigation } from "./folders.mjs";
 import { deleteDataFile, normalizeDataPath } from "../package/dataFolders.mjs";
 import { getFilePicker, isNotFoundError } from "../package/filePicker.mjs";
+import { resolveImportedSessionThumbUrl } from "./resolveLandingArt.mjs";
+import { softSeatPlayersFromSessionDocs } from "./softSeatPlayers.mjs";
 
 const SESSION_FOLDER_TYPES = ["Actor", "Item", "Scene", "JournalEntry"];
 const EXPORT_STAMP = /^\d{4}-\d{2}-\d{2}T/;
@@ -157,9 +159,15 @@ export function listImportedSessions(world = game) {
   return sessions.map((session) => {
     const docs = collectSessionDocuments(session, world);
     const landing = docs.scenes.find((scene) => scene.flags?.[FLAG_SCOPE]?.kind === "landing") ?? null;
+    const thumbUrl = resolveImportedSessionThumbUrl(landing);
+    const title = `${session.displayCode} · ${session.sessionName}`;
+    const countsTooltip =
+      `${docs.scenes.length} scenes · ${docs.actors.length} actors · ${docs.pcs.length} PCs · ` +
+      `${docs.items.length} items · ${docs.journals.length} journals`;
     return {
       ...session,
       folders: undefined,
+      title,
       counts: {
         scenes: docs.scenes.length,
         actors: docs.actors.length,
@@ -167,6 +175,8 @@ export function listImportedSessions(world = game) {
         items: docs.items.length,
         journals: docs.journals.length
       },
+      countsTooltip,
+      thumbUrl,
       landingId: landing?.id ?? null
     };
   });
@@ -191,7 +201,18 @@ export async function activateImportedSession(sessionCode, world = game) {
     docs.scenes.find((scene) => scene.flags?.[FLAG_SCOPE]?.kind === "landing") ?? docs.scenes[0];
   await landing.activate();
   await setSetting(SETTING_LIVE_SESSION, session.liveKey);
-  return { session, landingId: landing.id, sceneIds: docs.scenes.map((scene) => scene.id) };
+  let softSeat = null;
+  try {
+    softSeat = await softSeatPlayersFromSessionDocs(docs, { world });
+  } catch (error) {
+    console.warn(`${MODULE_ID} | soft-seat after activate failed`, error);
+  }
+  return {
+    session,
+    landingId: landing.id,
+    sceneIds: docs.scenes.map((scene) => scene.id),
+    softSeat
+  };
 }
 
 function findSession(sessionCode, world = game) {

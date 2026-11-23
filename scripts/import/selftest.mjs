@@ -56,9 +56,19 @@ const { resolveLocationBackground, resolveNpcMedia } = await import("./resolvePa
 const {
   classifyLandingFileName,
   classifyLandingTile,
+  resolveImportedSessionThumbUrl,
   resolveLandingPageArt,
+  resolveSessionThumbPackagePath,
   shouldUploadPackagePath
 } = await import("./resolveLandingArt.mjs");
+const {
+  findUserForSeat,
+  generateTempPassword,
+  normalizeSeatEntry,
+  seatsFromSessionPcs,
+  softSeatPlayers,
+  USER_ROLE
+} = await import("./softSeatPlayers.mjs");
 
 const {
   parseWeaponBaseDamage,
@@ -448,6 +458,21 @@ for (const path of paths) {
     new Map([["assets/session/cover.webp", "world/cover.webp"]])
   );
   assert(legacy.background === "world/cover.webp", "legacy sessionArt still works");
+
+  const thumbPath = resolveSessionThumbPackagePath(
+    { sessionArt: "assets/session/old.webp" },
+    uploaded.keys()
+  );
+  assert(
+    thumbPath === "Landing Page/SESSION_Clean.webp",
+    `inbox thumb prefers Clean (got ${thumbPath})`
+  );
+  assert(
+    resolveImportedSessionThumbUrl({
+      background: { src: "dlfi-imports/x/Landing Page/Clean.webp" }
+    }) === "dlfi-imports/x/Landing Page/Clean.webp",
+    "imported session thumb from Landing background"
+  );
 }
 
 // Location artwork resolves under assets/location/ (DLCE v2 layout)
@@ -1006,6 +1031,8 @@ for (const path of paths) {
       id: "pc_ibby",
       name: "Isabella Brightblade",
       knownAs: "Ibby",
+      playerName: "Alex",
+      playerId: "player_alex",
       ddbUrl: "https://www.dndbeyond.com/characters/118758199",
       ddbId: "118758199"
     },
@@ -1020,6 +1047,8 @@ for (const path of paths) {
   assert(stub.name === "Ibby", "PC actor name is knownAs");
   assert(stub.flags?.dlfi?.fullName === "Isabella Brightblade", "PC flags keep full name");
   assert(stub.flags?.dlfi?.knownAs === "Ibby", "PC flags keep knownAs");
+  assert(stub.flags?.dlfi?.playerName === "Alex", "PC flags keep playerName");
+  assert(stub.flags?.dlfi?.playerId === "player_alex", "PC flags keep playerId");
   assert(stub.system?.abilities, "PC stub clones template system");
   assert(stub.flags?.ddbimporter?.dndbeyond?.url?.includes("118758199"), "DDB url flag");
   assert(stub.flags?.ddbimporter?.dndbeyond?.characterId === "118758199", "DDB characterId flag");
@@ -1060,6 +1089,8 @@ for (const path of paths) {
     {
       name: "Isabella Brightblade",
       knownAs: "Ibby2",
+      playerName: "Alex",
+      playerId: "player_alex",
       ddbUrl: "https://www.dndbeyond.com/characters/999",
       ddbId: "999",
       tokenScale: 2
@@ -1075,6 +1106,8 @@ for (const path of paths) {
   assert(fillKeep.name === "Ibby2", "fill-only refreshes actor name to knownAs");
   assert(fillKeep["prototypeToken.name"] === "Ibby2", "fill-only refreshes Known as on token");
   assert(fillKeep["flags.dlfi.fullName"] === "Isabella Brightblade", "fill-only stores full name flag");
+  assert(fillKeep["flags.dlfi.playerName"] === "Alex", "fill-only stores playerName");
+  assert(fillKeep["flags.dlfi.playerId"] === "player_alex", "fill-only stores playerId");
   assert(!fillKeep["flags.ddbimporter.dndbeyond"], "fill-only does not overwrite existing DDB");
 
   const emptyish = {
@@ -1735,6 +1768,110 @@ for (const path of paths) {
   assert(
     both.includes("loc_other") && both.includes("loc_trader") && both.length === 2,
     "deduped bidirectional item locations"
+  );
+}
+
+// Soft-seat player accounts
+{
+  assert(generateTempPassword(10).length === 10, "temp password length");
+  assert(
+    normalizeSeatEntry({
+      actor: { flags: { dlfi: { playerName: "Alex", playerId: "p1" } } }
+    })?.playerId === "p1",
+    "normalizeSeatEntry reads actor flags"
+  );
+  assert(
+    normalizeSeatEntry({ actor: { flags: {} }, pc: { playerName: "Sam" } })?.playerName === "Sam",
+    "normalizeSeatEntry falls back to package playerName"
+  );
+  assert(normalizeSeatEntry({ actor: { flags: {} }, pc: {} }) === null, "seat needs player identity");
+
+  const users = [
+    {
+      id: "u_old",
+      name: "OldPlayer",
+      role: USER_ROLE.PLAYER,
+      character: null,
+      flags: { dlfi: { managed: true, playerId: "p_old" } },
+      async update(patch) {
+        Object.assign(this, patch);
+        if (patch["flags.dlfi.playerId"]) {
+          this.flags.dlfi.playerId = patch["flags.dlfi.playerId"];
+        }
+      }
+    },
+    {
+      id: "u_hide",
+      name: "HiddenSoon",
+      role: USER_ROLE.PLAYER,
+      character: null,
+      flags: { dlfi: { managed: true, playerId: "p_hide" } },
+      async update(patch) {
+        Object.assign(this, patch);
+      }
+    }
+  ];
+  const mkUsers = () => {
+    const list = [...users];
+    list.get = (id) => list.find((u) => u.id === id);
+    return list;
+  };
+  const actor = {
+    id: "a_pc1",
+    ownership: { default: 0 },
+    flags: { dlfi: { playerName: "Alex", playerId: "p_alex" } },
+    async update(patch) {
+      if (patch.ownership) {
+        this.ownership = patch.ownership;
+      }
+    }
+  };
+  let createdPayload = null;
+  const FakeUser = {
+    async create(data) {
+      createdPayload = data;
+      const user = {
+        id: "u_new",
+        name: data.name,
+        role: data.role,
+        character: null,
+        flags: data.flags,
+        async update(patch) {
+          Object.assign(this, patch);
+        }
+      };
+      users.push(user);
+      return user;
+    }
+  };
+  const world = { users: mkUsers(), actors: [actor] };
+  const matched = findUserForSeat(users, { playerId: "p_old", playerName: "Nope" });
+  assert(matched?.id === "u_old", "findUserForSeat prefers playerId");
+
+  const seats = seatsFromSessionPcs([{ actor, pc: { playerName: "Alex", playerId: "p_alex" } }]);
+  const result = await softSeatPlayers(seats, {
+    world,
+    UserDocument: FakeUser,
+    showPasswords: false
+  });
+  assert(result.created.length === 1 && result.created[0].name === "Alex", "creates missing user");
+  assert(createdPayload?.flags?.dlfi?.managed === true, "new user is managed");
+  assert(createdPayload?.flags?.dlfi?.playerId === "p_alex", "new user stores playerId");
+  assert(createdPayload?.password?.length >= 8, "new user gets temp password");
+  assert(result.softHidden.some((row) => row.userId === "u_hide"), "soft-hides unused managed user");
+  assert(users.find((u) => u.id === "u_hide")?.role === USER_ROLE.NONE, "hidden role is NONE");
+  assert(actor.ownership.u_new === 3, "grants OWNER ownership");
+  assert(users.find((u) => u.id === "u_new")?.character === "a_pc1", "sets user.character");
+
+  // Existing user: never wipe flags / password — only role/character.
+  const existingFlags = structuredClone(users[0].flags);
+  await softSeatPlayers(
+    [{ actor, playerName: "OldPlayer", playerId: "p_old" }],
+    { world, UserDocument: FakeUser, showPasswords: false }
+  );
+  assert(
+    JSON.stringify(users[0].flags) === JSON.stringify(existingFlags),
+    "existing user flags preserved on re-seat"
   );
 }
 

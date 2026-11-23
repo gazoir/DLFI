@@ -3,29 +3,11 @@
     <button type="button" class="dlfi-tab{{#if isSessions}} is-active{{/if}}" data-action="setTab" data-tab="sessions">Sessions</button>
     <button type="button" class="dlfi-tab{{#if isImport}} is-active{{/if}}" data-action="setTab" data-tab="import">Import</button>
     <button type="button" class="dlfi-tab{{#if isPack}} is-active{{/if}}" data-action="setTab" data-tab="pack">Pack</button>
+    <button type="button" class="dlfi-tab dlfi-tab-players" data-action="openPlayers" {{#if busy}}disabled{{/if}}>Players</button>
   </nav>
 
   {{#if isImport}}
   <div class="dlfi-panel">
-    <div class="dlfi-paths">
-      <div class="dlfi-path-row">
-        <div class="dlfi-path-meta">
-          <strong>DLCE inbox</strong>
-          <span class="notes">Zip packages only · nested as <code>Session Code · Session Name</code> · keeps 3 newest</span>
-          <code class="dlfi-path-value">Data/{{inboxPath}}</code>
-        </div>
-        <button type="button" data-action="pickInbox" {{#if busy}}disabled{{/if}}>Browse…</button>
-      </div>
-      <div class="dlfi-path-row">
-        <div class="dlfi-path-meta">
-          <strong>DLFI imports</strong>
-          <span class="notes">Imported artwork tree mirrors the Session Package zip layout</span>
-          <code class="dlfi-path-value">Data/{{importsPath}}</code>
-        </div>
-        <button type="button" data-action="pickImports" {{#if busy}}disabled{{/if}}>Browse…</button>
-      </div>
-    </div>
-
     <div class="dlfi-toolbar">
       <button type="button" data-action="refreshInbox" {{#if busy}}disabled{{/if}}>Refresh inbox</button>
       <button type="button" data-action="chooseZip" {{#if busy}}disabled{{/if}}>Choose zip…</button>
@@ -40,7 +22,11 @@
       {{#each sessions}}
       <li class="dlfi-session-row">
         <div class="dlfi-session-main">
-          <div class="dlfi-session-thumb is-empty" aria-hidden="true" title="Session art after import"></div>
+          {{#if thumbUrl}}
+          <img class="dlfi-session-thumb" src="{{thumbUrl}}" alt="" width="64" height="36">
+          {{else}}
+          <div class="dlfi-session-thumb is-empty" aria-hidden="true" title="No session art in package"></div>
+          {{/if}}
           <div class="dlfi-session-meta">
             <strong>{{displayCode}}</strong>
             <span>{{sessionName}}</span>
@@ -70,18 +56,42 @@
       </li>
       {{/each}}
     </ol>
+
+    <div class="dlfi-paths">
+      <div class="dlfi-path-row">
+        <div class="dlfi-path-meta">
+          <strong>DLCE inbox</strong>
+          <span class="notes">Zip packages only · nested as <code>Session Code · Session Name</code> · keeps 3 newest</span>
+          <code class="dlfi-path-value">Data/{{inboxPath}}</code>
+        </div>
+        <button type="button" data-action="pickInbox" {{#if busy}}disabled{{/if}}>Browse…</button>
+      </div>
+      <div class="dlfi-path-row">
+        <div class="dlfi-path-meta">
+          <strong>DLFI imports</strong>
+          <span class="notes">Imported artwork tree mirrors the Session Package zip layout</span>
+          <code class="dlfi-path-value">Data/{{importsPath}}</code>
+        </div>
+        <button type="button" data-action="pickImports" {{#if busy}}disabled{{/if}}>Browse…</button>
+      </div>
+    </div>
   </div>
   {{/if}}
 
   {{#if isSessions}}
   <div class="dlfi-panel">
-    <p class="notes">Imported sessions in this world. Activate switches navigation, the Landing scene and the live session without re-importing. Re-loading a session code replaces its previous import.</p>
+    <p class="notes">Imported sessions in this world. Activate switches navigation, the Landing scene, soft-seats players, and the live session without re-importing.</p>
     <div class="dlfi-toolbar">
       <button type="button" data-action="refreshSessions" {{#if busy}}disabled{{/if}}>Refresh</button>
+      <button type="button" data-action="openPlayers" {{#if busy}}disabled{{/if}}>Players</button>
       <button type="button" class="dlfi-delete-selected" data-action="deleteSelectedSessions" {{#if busy}}disabled{{/if}}>Delete selected</button>
       <label class="dlfi-inline-check">
         <input type="checkbox" class="dlfi-delete-assets" checked>
         Also remove <code>{{importsPath}}/…</code> asset folders
+      </label>
+      <label class="dlfi-inline-check">
+        <input type="checkbox" data-action="toggleAllSessions" {{#if busy}}disabled{{/if}}>
+        Select all
       </label>
     </div>
     {{#if status}}<p class="dlfi-status">{{status}}</p>{{/if}}
@@ -89,26 +99,26 @@
     {{#unless hasImported}}
       <p class="notes">No imported sessions yet. Use the Import tab to load a Session Package.</p>
     {{else}}
-    <label class="dlfi-inline-check">
-      <input type="checkbox" data-action="toggleAllSessions" {{#if busy}}disabled{{/if}}>
-      Select all
-    </label>
-    <ol class="dlfi-session-list">
+    <div class="dlfi-session-grid">
       {{#each importedSessions}}
-      <li class="dlfi-session-row{{#if isLive}} is-live{{/if}}">
-        <div class="dlfi-session-main">
+      <article class="dlfi-session-tile{{#if isLive}} is-live{{/if}}" title="{{countsTooltip}}">
+        <label class="dlfi-session-tile-check">
           <input type="checkbox" class="dlfi-session-check" value="{{sessionCode}}" aria-label="Select {{displayCode}}" {{#if ../busy}}disabled{{/if}}>
-          <div class="dlfi-session-meta">
-            <strong>{{displayCode}}{{#if isLive}} <span class="dlfi-live-badge">Live</span>{{/if}}</strong>
-            <span>{{sessionName}}</span>
-            <span class="notes">{{counts.scenes}} scenes · {{counts.actors}} actors · {{counts.items}} items · {{counts.journals}} journals · imported {{importedAt}}</span>
-          </div>
+        </label>
+        {{#if thumbUrl}}
+        <img class="dlfi-session-tile-art" src="{{thumbUrl}}" alt="" loading="lazy">
+        {{else}}
+        <div class="dlfi-session-tile-art is-empty" aria-hidden="true"></div>
+        {{/if}}
+        <div class="dlfi-session-tile-body">
+          <strong>{{displayCode}} · {{sessionName}}{{#if isLive}} <span class="dlfi-live-badge">Live</span>{{/if}}</strong>
+          <span class="notes">Imported {{importedAt}}</span>
           <button type="button" data-action="activateSession" data-session-code="{{sessionCode}}"
             {{#if ../busy}}disabled{{/if}}>{{#if isLive}}Re-activate{{else}}Activate{{/if}}</button>
         </div>
-      </li>
+      </article>
       {{/each}}
-    </ol>
+    </div>
     {{/unless}}
   </div>
   {{/if}}

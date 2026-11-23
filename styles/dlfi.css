@@ -2,7 +2,7 @@
 
 .dlfi-modal {
   box-sizing: border-box;
-  min-width: min(1200px, 96vw);
+  min-width: min(960px, 96vw);
 }
 
 .dlfi-app {
@@ -14,6 +14,7 @@
 
 .dlfi-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
   margin-bottom: 0.75rem;
 }
@@ -23,11 +24,15 @@
   text-decoration: underline;
 }
 
+.dlfi-tab-players {
+  margin-left: auto;
+}
+
 .dlfi-paths {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  margin-bottom: 0.85rem;
+  margin-top: 1rem;
   max-width: 100%;
 }
 
@@ -75,6 +80,10 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+}
+
+.dlfi-toolbar > button {
+  flex-shrink: 0;
 }
 
 .dlfi-status {
@@ -159,7 +168,8 @@
   gap: 0.35rem;
 }
 
-.dlfi-session-row.is-live {
+.dlfi-session-row.is-live,
+.dlfi-session-tile.is-live {
   border-color: var(--color-border-highlight, #c9a24a);
 }
 
@@ -170,4 +180,147 @@
   font-size: 0.75em;
   margin-left: 0.35rem;
   padding: 0.05rem 0.4rem;
+}
+
+/* Sessions tab — 4-column scrollable grid */
+.dlfi-session-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 0.75rem;
+  max-height: min(70vh, 640px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+.dlfi-session-tile {
+  border: 1px solid var(--color-border-light-primary, #555);
+  border-radius: 0.35rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.dlfi-session-tile-check {
+  left: 0.35rem;
+  position: absolute;
+  top: 0.35rem;
+  z-index: 1;
+}
+
+.dlfi-session-tile-art {
+  aspect-ratio: 16 / 9;
+  background: #1a1a1a;
+  display: block;
+  object-fit: cover;
+  width: 100%;
+}
+
+.dlfi-session-tile-art.is-empty {
+  opacity: 0.4;
+}
+
+.dlfi-session-tile-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.55rem 0.6rem 0.65rem;
+}
+
+.dlfi-session-tile-body > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dlfi-session-tile-body > button {
+  align-self: flex-start;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+/* Players modal */
+.dlfi-players-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+}
+
+.dlfi-player-row {
+  align-items: center;
+  border: 1px solid var(--color-border-light-primary, #555);
+  border-radius: 0.35rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: space-between;
+  padding: 0.55rem 0.65rem;
+}
+
+.dlfi-player-row.is-hidden {
+  opacity: 0.65;
+}
+
+.dlfi-player-main {
+  align-items: baseline;
+  display: flex;
+  flex: 1 1 10rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.dlfi-role-badge {
+  background: var(--color-border-light-primary, #555);
+  border-radius: 0.2rem;
+  font-size: 0.75em;
+  padding: 0.05rem 0.4rem;
+}
+
+.dlfi-player-pc {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.dlfi-player-pc select {
+  max-width: 100%;
+}
+
+.dlfi-password-table {
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.dlfi-password-table th,
+.dlfi-password-table td {
+  border: 1px solid var(--color-border-light-primary, #555);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .dlfi-session-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .dlfi-session-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

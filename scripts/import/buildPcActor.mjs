@@ -54,6 +54,7 @@ export function actorHasDdbLink(actor) {
  *   ddbId?: string|null,
  *   ddbUrl?: string|null,
  *   playerName?: string|null,
+ *   playerId?: string|null,
  *   id?: string|null
  * }} pc
  * @param {{
@@ -164,6 +165,7 @@ export function buildPcActorData(pc, media = {}) {
       knownAs,
       fullName: name,
       playerName: pc?.playerName ?? null,
+      playerId: pc?.playerId != null && String(pc.playerId).trim() ? String(pc.playerId).trim() : null,
       importKey: media.importKey ?? null,
       source: "dlce-pc-stub"
     }
@@ -205,6 +207,17 @@ export function buildExistingPcFillPatch(actor, pc, media = {}) {
   }
   if (fullName) {
     patch[`flags.${FLAG_SCOPE}.fullName`] = fullName;
+  }
+
+  const playerName =
+    pc?.playerName != null && String(pc.playerName).trim() ? String(pc.playerName).trim() : null;
+  if (playerName) {
+    patch[`flags.${FLAG_SCOPE}.playerName`] = playerName;
+  }
+  const playerId =
+    pc?.playerId != null && String(pc.playerId).trim() ? String(pc.playerId).trim() : null;
+  if (playerId) {
+    patch[`flags.${FLAG_SCOPE}.playerId`] = playerId;
   }
 
   if (portrait) {

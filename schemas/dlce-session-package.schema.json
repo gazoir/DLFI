@@ -205,6 +205,10 @@
           "type": ["string", "null"],
           "description": "IRL player display name assigned to this PC when known."
         },
+        "playerId": {
+          "type": ["string", "null"],
+          "description": "Stable DLCE player / seat id when known. DLFI stores it on Actor flags.dlfi.playerId and matches Foundry Users by this before falling back to playerName."
+        },
         "ddbId": { "type": ["string", "null"] },
         "ddbUrl": { "type": ["string", "null"] },
         "portrait": {

@@ -23,17 +23,18 @@ import {
   loadPackageFromZipBytes,
   loadPackageFromZipPath
 } from "../package/readPackage.mjs";
+import { openPlayersApp } from "./PlayersApp.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
 /**
- * Damned Lucky toolbar modal — Sessions | Import | Pack.
+ * Damned Lucky toolbar modal — Sessions | Import | Pack (+ Players).
  */
 export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
     id: "dlfi-damned-lucky",
     classes: ["dlfi-modal"],
-    position: { width: 1200, height: "auto" },
+    position: { width: 960, height: "auto" },
     window: {
       title: "Damned Lucky",
       resizable: true
@@ -49,7 +50,8 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       activateSession: DamnedLuckyApp.#onActivateSession,
       deleteSelectedSessions: DamnedLuckyApp.#onDeleteSelectedSessions,
       toggleAllSessions: DamnedLuckyApp.#onToggleAllSessions,
-      packLive: DamnedLuckyApp.#onPackLive
+      packLive: DamnedLuckyApp.#onPackLive,
+      openPlayers: DamnedLuckyApp.#onOpenPlayers
     }
   };
 
@@ -60,13 +62,16 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
   };
 
   /** @type {"sessions"|"import"|"pack"} */
-  #tab = "import";
+  #tab = "sessions";
   /** @type {ReturnType<typeof groupPackagesBySession>} */
   #sessions = [];
   /** @type {ReturnType<typeof listImportedSessions>} */
   #imported = [];
+  /** @type {string[]} blob URLs created for inbox thumbs */
+  #thumbObjectUrls = [];
   #busy = false;
   #status = "";
+  #didInitialSessionsRefresh = false;
 
   async _prepareContext() {
     return {
@@ -82,6 +87,48 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       isImport: this.#tab === "import",
       isPack: this.#tab === "pack"
     };
+  }
+
+  #revokeThumbUrls() {
+    for (const url of this.#thumbObjectUrls) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (_error) {
+        /* ignore */
+      }
+    }
+    this.#thumbObjectUrls = [];
+  }
+
+  /**
+   * Attach blob: thumb URLs for inbox session rows from in-memory zip bytes.
+   * @param {ReturnType<typeof groupPackagesBySession>} sessions
+   */
+  #attachInboxThumbs(sessions) {
+    this.#revokeThumbUrls();
+    for (const session of sessions) {
+      const version = session.versions?.[0];
+      const packagePath = session.thumbPackagePath;
+      const bytes = packagePath ? version?.package?.files?.get?.(packagePath) : null;
+      if (!bytes) {
+        session.thumbUrl = null;
+        continue;
+      }
+      const ext = packagePath.split(".").pop()?.toLowerCase() || "webp";
+      const mime =
+        ext === "png"
+          ? "image/png"
+          : ext === "jpg" || ext === "jpeg"
+            ? "image/jpeg"
+            : ext === "gif"
+              ? "image/gif"
+              : ext === "avif"
+                ? "image/avif"
+                : "image/webp";
+      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      this.#thumbObjectUrls.push(url);
+      session.thumbUrl = url;
+    }
   }
 
   refreshImported() {
@@ -120,6 +167,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       for (const session of this.#sessions) {
         session.versions = session.versions.slice(0, 3);
       }
+      this.#attachInboxThumbs(this.#sessions);
       this.#status = `Found ${this.#sessions.length} session(s), ${loaded.length} zip(s) in Data/${inbox}.`;
     } catch (error) {
       console.error(error);
@@ -144,6 +192,10 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     this.render();
   }
 
+  static async #onOpenPlayers() {
+    openPlayersApp();
+  }
+
   static async #onRefreshSessions() {
     this.refreshImported();
   }
@@ -160,7 +212,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     this.render();
     try {
       await activateImportedSession(code);
-      this.#status = `Activated ${row.displayCode}: navigation, Landing scene, and live session updated.`;
+      this.#status = `Activated ${row.displayCode}: navigation, Landing scene, soft-seat, and live session updated.`;
       notify(this.#status);
     } catch (error) {
       console.error(error);
@@ -323,9 +375,19 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
 
   _onRender(context, options) {
     super._onRender?.(context, options);
+    if (this.#tab === "sessions" && !this.#didInitialSessionsRefresh && !this.#busy) {
+      this.#didInitialSessionsRefresh = true;
+      this.refreshImported();
+      return;
+    }
     if (this.#tab === "import" && !this.#sessions.length && !this.#busy && !this.#status) {
       void this.refreshInbox();
     }
+  }
+
+  async close(options = {}) {
+    this.#revokeThumbUrls();
+    return super.close(options);
   }
 }
 
