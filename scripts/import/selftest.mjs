@@ -1017,7 +1017,9 @@ for (const path of paths) {
     }
   );
   assert(stub.type === "character", "PC stub is character");
-  assert(stub.name === "Isabella Brightblade", "PC actor keeps full name");
+  assert(stub.name === "Ibby", "PC actor name is knownAs");
+  assert(stub.flags?.dlfi?.fullName === "Isabella Brightblade", "PC flags keep full name");
+  assert(stub.flags?.dlfi?.knownAs === "Ibby", "PC flags keep knownAs");
   assert(stub.system?.abilities, "PC stub clones template system");
   assert(stub.flags?.ddbimporter?.dndbeyond?.url?.includes("118758199"), "DDB url flag");
   assert(stub.flags?.ddbimporter?.dndbeyond?.characterId === "118758199", "DDB characterId flag");
@@ -1062,11 +1064,17 @@ for (const path of paths) {
       ddbId: "999",
       tokenScale: 2
     },
-    { portrait: "world/new.webp", token: "world/new_token.webp" }
+    { portrait: "world/new.webp", token: "world/new_token.webp", tokenScale: 2 }
   );
-  assert(!fillKeep.img, "fill-only does not overwrite existing portrait");
-  assert(!fillKeep["prototypeToken.texture.src"], "fill-only does not overwrite existing token");
-  assert(!fillKeep["prototypeToken.name"], "fill-only does not overwrite existing Known as");
+  assert(fillKeep.img === "world/new.webp", "fill-only applies package portrait over DDB/existing");
+  assert(
+    fillKeep["prototypeToken.texture.src"] === "world/new_token.webp",
+    "fill-only applies package token over DDB/existing"
+  );
+  assert(fillKeep["prototypeToken.texture.scaleX"] === 2, "fill-only applies package token scale");
+  assert(fillKeep.name === "Ibby2", "fill-only refreshes actor name to knownAs");
+  assert(fillKeep["prototypeToken.name"] === "Ibby2", "fill-only refreshes Known as on token");
+  assert(fillKeep["flags.dlfi.fullName"] === "Isabella Brightblade", "fill-only stores full name flag");
   assert(!fillKeep["flags.ddbimporter.dndbeyond"], "fill-only does not overwrite existing DDB");
 
   const emptyish = {
@@ -1084,10 +1092,11 @@ for (const path of paths) {
       ddbId: "42",
       tokenScale: 1.25
     },
-    { portrait: "world/new.webp", token: "world/new_token.webp" }
+    { portrait: "world/new.webp", token: "world/new_token.webp", tokenScale: 1.25 }
   );
   assert(fillMissing.img === "world/new.webp", "fill-only sets missing portrait");
   assert(fillMissing["prototypeToken.texture.src"] === "world/new_token.webp", "fill-only sets missing token");
+  assert(fillMissing.name === "Newbie", "fill-only sets actor name to knownAs");
   assert(fillMissing["prototypeToken.name"] === "Newbie", "fill-only sets missing Known as");
   assert(fillMissing["flags.ddbimporter.dndbeyond"]?.characterId === "42", "fill-only sets missing DDB");
 

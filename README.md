@@ -4,7 +4,7 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.34`)
+## Status (`0.1.35`)
 
 Working in this slice:
 
@@ -22,7 +22,7 @@ Working in this slice:
 - **DLFI imports** (`Data/dlfi-imports`): separate tree mirroring the Session Package zip layout under `assets/` (ready for DLCE WD-type folders)
 - Template placement: fill dedicated Location drawings — **Description** (description/appearance), **POIs** (bullet list), **Session Notes** — delete empty/unused boxes (incl. legacy Description 4); bind NPCs to `1A#` slots (actor + token art) including reverse location→NPC links; Landing PCs only on `{partySize}P{seat}` placeholders (keep template x/y/scale; 2→`4P2`+`4P3`, 3–6→that row, 7+→`6P*` + overflow; delete unused `nPm` rows; ignore non-`nPm` tokens)
 - Battlemaps use the colour (non-grid) combat art; place unlinked enemies then linked PCs+pets in two footprint-spaced rows flush to the canvas bottom (below map art), with correct token size
-- PCs: match by DDB id/name or clone the bundled Player Character template into a stub under the shared **Damned Lucky** Actor folder (full Actor name, Known as on the prototype token, DDB Beyond URL flags, package portrait/token); fill-only on re-import; DialogV2 when stubs are created without a DDB URL; pets from `pcs[].pets` become NPC actors with combat stats
+- PCs: match by DDB id/name or clone the bundled Player Character template into a stub under the shared **Damned Lucky** Actor folder (Actor name = Known as, full name in `flags.dlfi.fullName`, Known as on the prototype token, DDB Beyond URL flags, package portrait/token); fill-only on re-import always applies package art + Known as (over DDB/default); DialogV2 when stubs are created without a DDB URL; pets from `pcs[].pets` become NPC actors with combat stats
 - Import console progress: numbered step logs with timings so long imports do not look hung
 - Leftovers holds NPCs/items not placed on any location or battlemap
 - NPC actors mapped from DLCE check_*/creature_*/combat_* fields; weapon damage strips ability mod for Foundry’s auto-`@mod`; items + “Items by location” journal; MSD journal
@@ -37,6 +37,7 @@ Working in this slice:
 - **0.1.24:** PC tokens Friendly; location NPC tokens Neutral (combat enemies stay Hostile)
 - **0.1.25:** Melee attacks pick DEX when to-hit matches DEX+prof (fixes Imp Sting +10); warn when to-hit is wild for CR
 - **0.1.26:** Battlemap PC tokens use Known as + Hovered by Anyone (default prototype too)
+- **0.1.35:** Damned Lucky modal 1200px + row overflow fixes; PC Actor name = Known as; fill-only always applies package portrait/token over DDB art
 - **0.1.34:** Widen Damned Lucky modal (960px) so Import path/session rows fit without scrollbars
 - **0.1.33:** DialogV2 when Session Package has 0 seated PCs (empty Damned Lucky / no Landing party tokens) with re-export instructions
 - **0.1.32:** Remove Expo Item 1–N placeholders from location scenes; Item Pile actors live under `{Session}/Item Piles` with the package item embedded + item portrait; Token Vision disabled on pile tokens
