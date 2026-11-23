@@ -164,3 +164,24 @@ export function groupPackagesBySession(loaded) {
   sessions.sort((a, b) => String(b.latestExportedAt).localeCompare(String(a.latestExportedAt)));
   return sessions;
 }
+
+/**
+ * Flag inbox session rows whose newest zip is newer than the world's imported
+ * copy of that sessionCode (`isNew: true`). Never-imported sessions are also New.
+ *
+ * @param {Array<{ sessionCode: string, latestExportedAt?: string }>} sessions
+ * @param {Array<{ sessionCode: string, exportedAt?: string }>} imported
+ * @returns {typeof sessions}
+ */
+export function markInboxSessionsNewerThanImported(sessions = [], imported = []) {
+  const importedAt = new Map(
+    (imported ?? []).map((row) => [String(row.sessionCode), String(row.exportedAt ?? "")])
+  );
+  for (const session of sessions ?? []) {
+    const code = String(session.sessionCode ?? "");
+    const inboxStamp = String(session.latestExportedAt ?? "");
+    const worldStamp = importedAt.get(code);
+    session.isNew = !worldStamp || (Boolean(inboxStamp) && inboxStamp > worldStamp);
+  }
+  return sessions;
+}

@@ -21,7 +21,8 @@ import {
   groupPackagesBySession,
   listInboxCandidates,
   loadPackageFromZipBytes,
-  loadPackageFromZipPath
+  loadPackageFromZipPath,
+  markInboxSessionsNewerThanImported
 } from "../package/readPackage.mjs";
 import { openPlayersApp } from "./PlayersApp.mjs";
 
@@ -74,6 +75,9 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
   #didInitialSessionsRefresh = false;
 
   async _prepareContext() {
+    if (this.#tab === "import" && this.#sessions.length) {
+      markInboxSessionsNewerThanImported(this.#sessions, this.#imported);
+    }
     return {
       tab: this.#tab,
       sessions: this.#sessions,
@@ -167,6 +171,12 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       for (const session of this.#sessions) {
         session.versions = session.versions.slice(0, 3);
       }
+      try {
+        this.#imported = listImportedSessions();
+      } catch (_error) {
+        this.#imported = [];
+      }
+      markInboxSessionsNewerThanImported(this.#sessions, this.#imported);
       this.#attachInboxThumbs(this.#sessions);
       this.#status = `Found ${this.#sessions.length} session(s), ${loaded.length} zip(s) in Data/${inbox}.`;
     } catch (error) {
@@ -188,6 +198,18 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     if (tab === "sessions") {
       this.refreshImported();
       return;
+    }
+    if (tab === "import") {
+      try {
+        this.#imported = listImportedSessions();
+      } catch (_error) {
+        this.#imported = [];
+      }
+      markInboxSessionsNewerThanImported(this.#sessions, this.#imported);
+      if (!this.#sessions.length && !this.#busy) {
+        await this.refreshInbox();
+        return;
+      }
     }
     this.render();
   }
