@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.40`)
+## Status (`0.1.41`)
 
+- **0.1.41:** Location POI drawings: strip `[[wikilinks]]`, 📍 bullets, blank line between entries
 - **0.1.40:** Health Estimate: hide on Location NPCs + Landing; show on all battlemap tokens
 - **0.1.39:** Item Piles no longer double-add the same item; GG/custom NPC HP = (8 + Con mod) × CR
 - **0.1.38:** Import tab **New** badge when inbox zip is newer than the Sessions list copy
