@@ -597,6 +597,118 @@ for (const path of paths) {
   );
 }
 
+// Monk's Active Tile Triggers — scene nav rolling window
+{
+  const {
+    LEFT_NAV_SLOTS,
+    RIGHT_NAV_SLOTS,
+    classifyMattNavSide,
+    leftNavWindow,
+    listMattNavTiles,
+    mattTileUpdate,
+    rightNavWindow
+  } = await import("./mattSceneNav.mjs");
+
+  assert(LEFT_NAV_SLOTS === 14 && RIGHT_NAV_SLOTS === 4, "nav slot counts");
+  const many = Array.from({ length: 16 }, (_, i) => ({ id: `s${i}`, name: `Scene ${i + 1}` }));
+  const w0 = leftNavWindow(many, 0);
+  assert(w0.length === 14 && w0[0].id === "s0" && w0[13].id === "s13", "scenes 1–6 keep Landing…14");
+  const w6 = leftNavWindow(many, 6);
+  assert(w6[0].id === "s1" && w6[13].id === "s14", "scene 7 drops Landing, gains scene 15");
+  const w7 = leftNavWindow(many, 7);
+  assert(w7[0].id === "s2" && w7[13].id === "s15", "scene 8 drops Landing+1, gains 15–16");
+  const few = many.slice(0, 5);
+  assert(leftNavWindow(few, 0).length === 5, "fewer than 14 keeps all");
+
+  const maps = [
+    { sceneId: "b1", hostLocationId: "loc_a" },
+    { sceneId: "b2", hostLocationId: "loc_a" },
+    { sceneId: "b3", hostLocationId: "loc_b" },
+    { sceneId: "b4", hostLocationId: "loc_b" },
+    { sceneId: "b5", hostLocationId: "loc_b" }
+  ];
+  assert(
+    rightNavWindow(maps, { kind: "location", dlceId: "loc_a" }).map((r) => r.sceneId).join(",") ===
+      "b1,b2",
+    "location right nav prefers linked battlemaps"
+  );
+  assert(
+    rightNavWindow(maps, { kind: "landing" }).map((r) => r.sceneId).join(",") === "b1,b2,b3,b4",
+    "landing right nav takes first 4"
+  );
+
+  const metrics = { sceneX: 960, sceneWidth: 1920, sceneY: 540, sceneHeight: 1080 };
+  assert(
+    classifyMattNavSide(
+      { x: 240, y: 180, width: 448, height: 252, flags: { "monks-active-tiles": { active: true } } },
+      metrics
+    ) === "left",
+    "left padding tile classified left"
+  );
+  assert(
+    classifyMattNavSide(
+      {
+        x: 3120,
+        y: 1020,
+        width: 320,
+        height: 540,
+        flags: { "monks-active-tiles": { active: true } }
+      },
+      metrics
+    ) === "right",
+    "right padding tile classified right"
+  );
+  assert(
+    classifyMattNavSide({ x: 240, y: 180, width: 448, height: 252, flags: {} }, metrics) === null,
+    "non-MATT tile ignored"
+  );
+
+  const listed = listMattNavTiles({
+    width: 1920,
+    height: 1080,
+    dimensions: { width: 3840, height: 2160, sceneWidth: 1920, sceneHeight: 1080, sceneX: 960, sceneY: 540 },
+    tiles: {
+      contents: [
+        {
+          id: "L1",
+          x: 240,
+          y: 480,
+          width: 448,
+          height: 252,
+          flags: { "monks-active-tiles": { active: true, actions: [] } }
+        },
+        {
+          id: "R1",
+          x: 3120,
+          y: 1020,
+          width: 320,
+          height: 540,
+          flags: { "monks-active-tiles": { active: true, actions: [] } }
+        },
+        { id: "logo", x: 1000, y: 100, width: 400, height: 200, flags: {} }
+      ]
+    }
+  });
+  assert(listed.left.map((t) => t.id).join(",") === "L1", "lists one left nav tile");
+  assert(listed.right.map((t) => t.id).join(",") === "R1", "lists one right nav tile");
+
+  const update = mattTileUpdate(
+    {
+      id: "L1",
+      flags: { "monks-active-tiles": { active: true, restriction: "gm", trigger: ["click"] } }
+    },
+    { sceneId: "abc", name: "01. 📍 Dock", img: "world/dock.webp", kind: "location" },
+    "left"
+  );
+  assert(update["texture.src"] === "world/dock.webp", "nav tile texture set");
+  assert(update.flags["monks-active-tiles"].actions[0].action === "scene", "scene action");
+  assert(
+    update.flags["monks-active-tiles"].actions[0].data.sceneid.id === "Scene.abc",
+    "scene id uuid-style"
+  );
+  assert(update.flags.dlfi?.kind === "matt-nav-left", "dlfi nav kind");
+}
+
 // Location POIs → emoji list (strip wikilinks, blank lines between)
 {
   assert(stripWikiLinks("[[npc_kira|Kira]]") === "Kira", "wikilink alias kept");

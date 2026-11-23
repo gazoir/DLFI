@@ -13,7 +13,8 @@ import {
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
   SETTING_TEMPLATE_LANDING,
-  SETTING_TEMPLATE_LOCATION
+  SETTING_TEMPLATE_LOCATION,
+  SETTING_TEMPLATE_OUTRO
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import {
@@ -57,6 +58,7 @@ import {
   isItemPilesActive,
   itemPilesDetectionDebug
 } from "./scenePlacement.mjs";
+import { populateAllMattSceneNav, sceneArtSrc } from "./mattSceneNav.mjs";
 import { softSeatPlayersFromImport } from "./softSeatPlayers.mjs";
 import {
   buildMsdSceneSequence,
@@ -350,6 +352,7 @@ export async function importSessionPackage(loaded, options = {}) {
   /** @type {string[]} */
   const sessionSceneIds = [];
   let landingScene = null;
+  let outroScene = null;
   let leftoversScene = null;
 
   // --- Locations + combat battlemaps in MSD appearance order (before Landing/Leftovers) ---
@@ -408,6 +411,7 @@ export async function importSessionPackage(loaded, options = {}) {
       const raw = readDocument(entry.file);
       locationSceneMeta.set(entry.id, {
         scene,
+        artwork: bg || sceneArtSrc(scene),
         description: locationDescriptionText(raw),
         poisText: formatPoisBulletList(locationPois(raw)),
         sessionNotes: locationSessionNotesText(raw, manifest),
@@ -453,7 +457,13 @@ export async function importSessionPackage(loaded, options = {}) {
     }
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
-    battlemapMeta.push({ scene, entry, raw });
+    battlemapMeta.push({
+      scene,
+      entry,
+      raw,
+      artwork: mapPath || sceneArtSrc(scene),
+      hostLocationId: locId || null
+    });
   }
 
   // Reverse index: location "Owned by" / similar links → NPC placement
@@ -527,6 +537,38 @@ export async function importSessionPackage(loaded, options = {}) {
   }
   sessionSceneIds.push(landing.id);
   landingScene = landing;
+
+  // --- Outro (Thanks for Playing) — Landing-like; user owns the Thanks tile on the template ---
+  let outro =
+    (await duplicateTemplateScene(SETTING_TEMPLATE_OUTRO, `${folderName} — Outro`, {
+      folderId: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { kind: "outro", importKey } }
+    })) ??
+    (await Scene.create({
+      name: `${folderName} — Outro`,
+      navigation: true,
+      folder: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { kind: "outro", importKey } }
+    }));
+  await outro.update({
+    name: `${folderName} — Outro`,
+    navName: "",
+    navigation: true,
+    folder: folders.Scene?.id ?? null,
+    flags: {
+      [FLAG_SCOPE]: {
+        kind: "outro",
+        importKey,
+        hideTokenEffects: true
+      }
+    }
+  });
+  // Same Clean session art as Landing background; do not swap Logo/Title tiles.
+  if (landingArt.background) {
+    await applySceneBackground(outro, landingArt.background);
+  }
+  sessionSceneIds.push(outro.id);
+  outroScene = outro;
 
   // --- Leftovers (formerly Inbox): catch-all for unplaced NPCs/items ---
   let leftovers =
@@ -940,6 +982,12 @@ export async function importSessionPackage(loaded, options = {}) {
     await finalizeLandingScene(landingScene, sessionPcs);
   }
 
+  if (outroScene) {
+    progress("finalize Outro", { seatedPcs: sessionPcs.length });
+    // Same PC slot binding as Landing when the Outro template has nPm placeholders.
+    await finalizeLandingScene(outroScene, sessionPcs);
+  }
+
   // Leftovers: NPCs not on any location/battlemap + items without a location
   const leftoverNpcs = npcRecords
     .filter((row) => !placedNpcIds.has(row.entry.id))
@@ -952,6 +1000,86 @@ export async function importSessionPackage(loaded, options = {}) {
     await finalizeLeftoversScene(leftoversScene, {
       npcs: leftoverNpcs,
       itemNotes: leftoverItems
+    });
+  }
+
+  // Monk's Active Tile Triggers: left = Landing → locations → Outro; right = battlemaps.
+  // Populate on Location / Landing / Outro only (not battlemaps / leftovers).
+  {
+    progress("populate MATT scene nav tiles");
+    const locationRows = [];
+    for (const step of sceneSequence) {
+      if (step.kind !== "location") {
+        continue;
+      }
+      const meta = locationSceneMeta.get(step.entry.id);
+      if (!meta?.scene) {
+        continue;
+      }
+      locationRows.push({
+        scene: meta.scene,
+        kind: "location",
+        dlceId: step.entry.id,
+        img: meta.artwork || sceneArtSrc(meta.scene),
+        name: meta.scene.name
+      });
+    }
+    const landingImg = landingArt.background || sceneArtSrc(landingScene);
+    /** @type {Array<{ scene: object, kind: string, dlceId?: string|null, img?: string|null, name?: string }>} */
+    const navScenes = [];
+    /** @type {Array<{ sceneId: string, name: string, img?: string|null, kind: string }>} */
+    const leftTargets = [];
+    if (landingScene) {
+      navScenes.push({
+        scene: landingScene,
+        kind: "landing",
+        dlceId: null,
+        img: landingImg,
+        name: landingScene.name
+      });
+      leftTargets.push({
+        sceneId: landingScene.id,
+        name: landingScene.name,
+        img: landingImg,
+        kind: "landing"
+      });
+    }
+    for (const row of locationRows) {
+      navScenes.push(row);
+      leftTargets.push({
+        sceneId: row.scene.id,
+        name: row.name || row.scene.name,
+        img: row.img,
+        kind: "location"
+      });
+    }
+    if (outroScene) {
+      const outroImg = landingArt.background || sceneArtSrc(outroScene);
+      navScenes.push({
+        scene: outroScene,
+        kind: "outro",
+        dlceId: null,
+        img: outroImg,
+        name: outroScene.name
+      });
+      leftTargets.push({
+        sceneId: outroScene.id,
+        name: outroScene.name,
+        img: outroImg,
+        kind: "outro"
+      });
+    }
+    const battleNav = battlemapMeta.map((meta) => ({
+      sceneId: meta.scene.id,
+      name: meta.scene.name,
+      img: meta.artwork || sceneArtSrc(meta.scene),
+      kind: "battlemap",
+      hostLocationId: meta.hostLocationId ?? null
+    }));
+    await populateAllMattSceneNav({
+      navScenes,
+      leftTargets,
+      battlemaps: battleNav
     });
   }
 
@@ -1032,7 +1160,8 @@ export async function importSessionPackage(loaded, options = {}) {
     pcsMatchedOrCreated: sessionPcs.length,
     pcStubsCreated: createdPcStubs.length,
     pcFolder: PC_ACTOR_FOLDER_NAME,
-    landingId: landing?.id ?? landingScene?.id ?? null
+    landingId: landing?.id ?? landingScene?.id ?? null,
+    outroId: outroScene?.id ?? null
   });
 
   notify(
@@ -1045,6 +1174,7 @@ export async function importSessionPackage(loaded, options = {}) {
     folderName,
     sceneIds: sessionSceneIds,
     landingId: landing?.id ?? null,
+    outroId: outroScene?.id ?? null,
     leftoversId: leftoversScene?.id ?? null
   };
 }

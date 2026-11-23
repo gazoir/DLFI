@@ -114,6 +114,9 @@ export function bundledKindForSetting(settingKey) {
       return "battlemap";
     case "templateLanding":
       return "landing";
+    case "templateOutro":
+      // No bundled Outro — user supplies a Landing-like template with Thanks for Playing.
+      return null;
     case "templateInbox":
       return "leftovers";
     default:

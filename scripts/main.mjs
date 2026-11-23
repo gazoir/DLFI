@@ -18,6 +18,7 @@ import {
   SETTING_TEMPLATE_INBOX,
   SETTING_TEMPLATE_LANDING,
   SETTING_TEMPLATE_LOCATION,
+  SETTING_TEMPLATE_OUTRO,
   setting
 } from "./constants.mjs";
 import { registerHideLandingEffectsHooks } from "./canvas/hideLandingEffects.mjs";
@@ -77,6 +78,15 @@ Hooks.once("init", () => {
   game.settings.register(MODULE_ID, SETTING_TEMPLATE_LANDING, {
     name: "Landing page scene template (id or UUID)",
     hint: "Optional. Paste a Scene id or UUID. Leave blank to use the bundled Landing Page Template.",
+    scope: "world",
+    config: true,
+    type: String,
+    default: ""
+  });
+
+  game.settings.register(MODULE_ID, SETTING_TEMPLATE_OUTRO, {
+    name: "Outro page scene template (id or UUID)",
+    hint: "Optional. Paste a Scene id or UUID for the end-of-session Outro (Thanks for Playing). Leave blank to create a blank Outro scene.",
     scope: "world",
     config: true,
     type: String,
