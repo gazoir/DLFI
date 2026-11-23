@@ -429,10 +429,13 @@ export async function finalizeItemPileActor(actorUuid, item, opts = {}) {
     await pileActor.update(patch);
   }
 
+  // createItemPile already embeds items when called with `items: [...]`.
+  // Only seed when the pile is still empty — never add a duplicate by name/id.
   const itemData = itemDataForPile(item);
   if (itemData) {
-    const hasItems = (pileActor.items?.size ?? pileActor.items?.length ?? 0) > 0;
-    if (!hasItems) {
+    const existing = pileActorItemsList(pileActor);
+    const alreadyHas = existing.some((entry) => itemPileEntriesMatch(entry, itemData));
+    if (existing.length === 0 && !alreadyHas) {
       const api = globalThis.game?.itempiles?.API;
       if (typeof api?.addItems === "function") {
         try {
@@ -447,6 +450,43 @@ export async function finalizeItemPileActor(actorUuid, item, opts = {}) {
     }
   }
   return pileActor;
+}
+
+/**
+ * @param {Actor|null|undefined} pileActor
+ * @returns {object[]}
+ */
+export function pileActorItemsList(pileActor) {
+  const raw = pileActor?.items;
+  if (!raw) {
+    return [];
+  }
+  if (typeof raw[Symbol.iterator] === "function") {
+    return [...raw];
+  }
+  if (Array.isArray(raw.contents)) {
+    return [...raw.contents];
+  }
+  if (typeof raw.size === "number" && typeof raw.get === "function") {
+    return [...raw];
+  }
+  return [];
+}
+
+/**
+ * @param {object} existing
+ * @param {object} candidate
+ * @returns {boolean}
+ */
+export function itemPileEntriesMatch(existing, candidate) {
+  const existingId = existing?.id ?? existing?._id ?? null;
+  const candidateId = candidate?.id ?? candidate?._id ?? null;
+  if (existingId && candidateId && String(existingId) === String(candidateId)) {
+    return true;
+  }
+  const existingName = String(existing?.name ?? "").trim().toLowerCase();
+  const candidateName = String(candidate?.name ?? "").trim().toLowerCase();
+  return Boolean(existingName && candidateName && existingName === candidateName);
 }
 
 /**
@@ -563,7 +603,9 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
           }
         }
 
-        await finalizeItemPileActor(actorUuid, itemPayload ?? item, {
+        // Items were already passed to createItemPile — finalize name/img/folder
+        // only. Re-passing the item here was duplicating every pile entry.
+        await finalizeItemPileActor(actorUuid, null, {
           img,
           folderId: actorFolderId,
           name

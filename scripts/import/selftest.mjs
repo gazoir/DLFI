@@ -50,7 +50,9 @@ const {
   buildNpcNpcActorData,
   collectNpcLocationIds,
   ensureNpcSkillsAndCr,
-  parseHitDamageParts
+  parseChallengeRating,
+  parseHitDamageParts,
+  resolveNpcHitPoints
 } = await import("./buildNpcActor.mjs");
 const { resolveLocationBackground, resolveNpcMedia } = await import("./resolvePackageAsset.mjs");
 const {
@@ -98,6 +100,7 @@ const {
   classifyLocationFieldDrawings,
   classifyLocationFieldLabel,
   compareItemsForPilePlacement,
+  finalizeItemPileActor,
   ITEM_PILE_COLUMNS,
   ITEM_PILE_SCALE,
   ITEM_PILE_PLACEHOLDER_NAME_RE,
@@ -105,9 +108,11 @@ const {
   ITEM_PILES_MODULE_ID_LEGACY,
   isItemPilesActive,
   isLocationItemPilePlaceholderToken,
+  itemPileEntriesMatch,
   itemPileSortKey,
   layoutBattlemapRosterLines,
   layoutLocationItemPilePositions,
+  pileActorItemsList,
   sceneCanvasMetrics,
   selectLandingPcSlots,
   tokenPlacementSpec
@@ -1725,6 +1730,84 @@ for (const path of paths) {
   assert(token.flags["item-piles"]?.data?.type === "pile", "item-piles data.type=pile");
   assert(token.flags["item-piles"]?.data?.singleItemScale === 0.75, "singleItemScale 0.75");
   assert(token.flags.dlfi?.kind === "item-pile", "dlfi kind item-pile");
+
+  assert(
+    itemPileEntriesMatch({ name: "Shaped Red Coral Book Binding", id: "a" }, {
+      name: "shaped red coral book binding",
+      _id: "b"
+    }),
+    "pile entry match is case-insensitive by name"
+  );
+  assert(
+    pileActorItemsList({ items: [{ name: "Ring" }, { name: "Cup" }] }).length === 2,
+    "pileActorItemsList reads array-like items"
+  );
+
+  // finalize must not re-add when the pile already has the item (createItemPile path).
+  let addCalls = 0;
+  const existingPile = {
+    name: "Pile",
+    img: null,
+    folder: null,
+    items: [{ name: "Shaped Red Coral Book Binding", id: "itm1" }],
+    async update() {},
+    async createEmbeddedDocuments() {
+      addCalls += 1;
+    }
+  };
+  globalThis.fromUuid = async () => existingPile;
+  globalThis.game = {
+    ...(globalThis.game || {}),
+    itempiles: {
+      API: {
+        async addItems() {
+          addCalls += 1;
+        }
+      }
+    }
+  };
+  await finalizeItemPileActor("Actor.pile", {
+    name: "Shaped Red Coral Book Binding",
+    img: "icons/book.svg"
+  });
+  assert(addCalls === 0, "finalize does not duplicate an existing pile item");
+  delete globalThis.fromUuid;
+}
+
+// NPC HP house rule: (8 + Con mod) × CR for non-published
+{
+  assert(parseChallengeRating({ combat_cr: "1/4" }) === 0.25, "parses fractional CR 1/4");
+  assert(parseChallengeRating({ combat_cr: "1/8" }) === 0.125, "parses fractional CR 1/8");
+  assert(parseChallengeRating({ combat_level: 8 }) === 2, "GG level 8 → CR 2");
+  assert(
+    resolveNpcHitPoints(
+      { combat_enabled: "true", check_con: "16", combat_level: 8, combat_stat_source: "gg" },
+      2
+    ) === 22,
+    "GG HP = (8+3)×2"
+  );
+  assert(
+    resolveNpcHitPoints(
+      { combat_stat_source: "pb", combat_hp: "256", check_con: "16", combat_cr: "17" },
+      17
+    ) === 256,
+    "published HP stays official"
+  );
+  const ggActor = buildNpcNpcActorData(
+    {
+      name: "Guard",
+      fields: {
+        combat_enabled: "true",
+        combat_stat_source: "gg",
+        combat_level: "4",
+        check_con: "10",
+        combat_hp: "99"
+      }
+    },
+    { id: "npc_guard", name: "Guard" }
+  );
+  assert(ggActor.system.attributes.hp.value === 8, "Foundry GG HP overrides stored combat_hp");
+  assert(ggActor.system.details.cr === 1, "Foundry CR from GG level/4");
 }
 
 // Bidirectional item ↔ location relationship collection

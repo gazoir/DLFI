@@ -280,8 +280,12 @@ function buildSystemFromFields(fields) {
     system.attributes.ac = { calc: "natural", flat: ac };
   }
 
-  const hp = firstNumber(fields, ["combat_hp", "hp", "hit_points", "hitPoints"]);
   const hpFormula = firstString(fields, ["combat_hit_dice", "combat_hp_formula", "hp_formula", "hit_dice"]);
+  const cr = parseChallengeRating(fields);
+  // Default CR 1 so proficiency bonus resolves for non-combat NPCs.
+  system.details.cr = cr != null ? cr : 1;
+
+  const hp = resolveNpcHitPoints(fields, system.details.cr);
   if (hp != null) {
     system.attributes.hp = {
       value: hp,
@@ -294,10 +298,6 @@ function buildSystemFromFields(fields) {
 
   Object.assign(system.attributes.movement, parseSpeedString(firstString(fields, ["combat_speed", "speed"])));
   Object.assign(system.attributes.senses, parseSensesString(firstString(fields, ["combat_senses", "senses"])));
-
-  const cr = firstNumber(fields, ["combat_cr", "cr", "challenge", "challenge_rating"]);
-  // Default CR 1 so proficiency bonus resolves for non-combat NPCs.
-  system.details.cr = cr != null ? cr : 1;
 
   const creatureType = firstString(fields, ["combat_creature_type", "creature_type", "creatureType"]);
   if (creatureType) {
@@ -1136,6 +1136,73 @@ function firstNumber(obj, keys) {
     }
   }
   return null;
+}
+
+/** Parse CR labels including fractions (`1/8`, `1/4`, `1/2`). */
+function parseChallengeRatingValue(raw) {
+  if (raw == null || raw === "") {
+    return null;
+  }
+  const text = String(raw).trim().toLowerCase().replace(/^cr\s*/i, "");
+  if (!text) {
+    return null;
+  }
+  const fraction = text.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (fraction) {
+    const num = Number(fraction[1]);
+    const den = Number(fraction[2]);
+    if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return num / den;
+    }
+  }
+  const num = Number(text.replace(/,/g, "").match(/-?\d+(\.\d+)?/)?.[0]);
+  return Number.isFinite(num) ? num : null;
+}
+
+/**
+ * Resolve CR from combat_cr (incl. fractions) or GG combat_level ÷ 4.
+ * @param {Record<string, unknown>} fields
+ * @returns {number|null}
+ */
+export function parseChallengeRating(fields) {
+  const fromLabel = parseChallengeRatingValue(
+    firstString(fields, ["combat_cr", "cr", "challenge", "challenge_rating"])
+  );
+  if (fromLabel != null) {
+    return fromLabel;
+  }
+  const level = firstNumber(fields, ["combat_level", "level"]);
+  if (level != null && level > 0) {
+    return Math.max(level / 4, 0.125);
+  }
+  return null;
+}
+
+/**
+ * House HP for non-published NPCs: (8 + Con modifier) × CR.
+ * Published (`pb` / `official`) keep the stored combat_hp.
+ * @param {Record<string, unknown>} fields
+ * @param {number|null} cr
+ * @returns {number|null}
+ */
+export function resolveNpcHitPoints(fields, cr) {
+  const source = firstString(fields, ["combat_stat_source", "stat_source"]).toLowerCase();
+  const isPublished = source === "pb" || source === "official";
+  const stored = firstNumber(fields, ["combat_hp", "hp", "hit_points", "hitPoints"]);
+  if (isPublished) {
+    return stored;
+  }
+  const hasCombat =
+    String(fields?.combat_enabled ?? "").trim().toLowerCase() === "true" ||
+    stored != null ||
+    firstNumber(fields, ["combat_level", "combat_ac"]) != null ||
+    Boolean(firstString(fields, ["combat_cr", "combat_rank", "combat_role"]));
+  if (!hasCombat) {
+    return stored;
+  }
+  const con = firstNumber(fields, ABILITY_ALIASES.con) ?? 10;
+  const effectiveCr = cr != null && cr > 0 ? cr : 1;
+  return Math.max(1, Math.round((8 + abilityModifier(con)) * effectiveCr));
 }
 
 function firstString(obj, keys) {
