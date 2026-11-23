@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.41`)
+## Status (`0.1.42`)
 
+- **0.1.42:** Monk's Active Tile Triggers scene nav on Location/Landing/Outro (left: Landing→locations→Outro with rolling window; right: battlemaps); Outro Page Template setting
 - **0.1.41:** Location POI drawings: strip `[[wikilinks]]`, 📍 bullets, blank line between entries
 - **0.1.40:** Health Estimate: hide on Location NPCs + Landing; show on all battlemap tokens
 - **0.1.39:** Item Piles no longer double-add the same item; GG/custom NPC HP = (8 + Con mod) × CR
@@ -22,7 +23,8 @@ Working in this slice:
 - **Choose zip…** for a local DLCE export without the inbox
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
 - Uploads package assets under `Data/dlfi-imports/…` (plus top-level `Landing Page/` slides)
-- Location / Landing / Battlemap / Leftovers scenes (configured templates, or bundled Expo/Landing/Battlemap defaults when unset)
+- Location / Landing / Outro / Battlemap / Leftovers scenes (configured templates, or bundled Expo/Landing/Battlemap defaults when unset; Outro uses the **Outro page scene template** setting)
+- **MATT scene nav** (requires Monk's Active Tile Triggers): on Location / Landing / Outro, left padding tiles → Landing → locations → Outro (rolling window from Scene 7 when >14); right portrait tiles → battlemaps (prefer location-linked); unused placeholders deleted
 - **MSD scene order:** location + combat battlemap scenes share one sequence (`01. 📍 Name`, `02. ⚔️ Name`) from unified `msdOrder` when present, else locations then linked combats (including reverse location→challenge hosts); non-combat challenges excluded
 - **Battlemap backgrounds:** resolve colour maps from `assets/location/battlemaps/{locationId}` (DLCE v2) via host location, not only legacy `assets/battlemaps/`
 - **MSD journal:** package HTML → Foundry single-column page (location + challenge `<h2>` for ToC, `../assets/…` → uploaded world paths, `@UUID` links); see `docs/DLCE_AGENT_BRIEF_MSD_FOUNDRY.md`

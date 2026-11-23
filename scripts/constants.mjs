@@ -12,6 +12,8 @@ export const SETTING_IMPORTS = "importsPath";
 export const SETTING_TEMPLATE_LOCATION = "templateLocation";
 export const SETTING_TEMPLATE_BATTLEMAP = "templateBattlemap";
 export const SETTING_TEMPLATE_LANDING = "templateLanding";
+/** Outro page (Thanks for Playing) — same shape as Landing, without logo/title tiles. */
+export const SETTING_TEMPLATE_OUTRO = "templateOutro";
 export const SETTING_TEMPLATE_INBOX = "templateInbox";
 export const SETTING_SPELL_PACKS = "spellItemPacks";
 export const SETTING_LIVE_SESSION = "liveSessionKey";
