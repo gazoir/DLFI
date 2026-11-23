@@ -594,14 +594,33 @@ export function locationPois(raw) {
 }
 
 /**
- * Format POIs as a plain-text bullet list for a Foundry Description drawing.
+ * Strip Obsidian-style `[[wikilinks]]` for Foundry drawings.
+ * `[[id|Label]]` → Label; `[[Name]]` → Name.
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripWikiLinks(text) {
+  return String(text ?? "")
+    .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2")
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Format POIs for a Foundry Location drawing:
+ * - strip [[wikilinks]]
+ * - 📍 emoji instead of •
+ * - blank line between each POI
  */
 export function formatPoisBulletList(pois) {
-  const list = (pois ?? []).map((poi) => String(poi ?? "").trim()).filter(Boolean);
+  const list = (pois ?? [])
+    .map((poi) => stripWikiLinks(String(poi ?? "")))
+    .filter(Boolean);
   if (!list.length) {
     return "";
   }
-  return list.map((poi) => `• ${poi}`).join("\n");
+  return list.map((poi) => `📍 ${poi}`).join("\n\n");
 }
 
 function normalizePoiList(value) {

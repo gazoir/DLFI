@@ -91,6 +91,7 @@ const {
   locationDescriptionText,
   locationPois,
   locationSessionNotesText,
+  stripWikiLinks,
   resolveChallengeHostLocationId,
   resolveColourBattlemapPath,
   collectNpcLocationIds: collectNpcLocationIdsFromLinks
@@ -596,17 +597,29 @@ for (const path of paths) {
   );
 }
 
-// Location POIs → bullet list
+// Location POIs → emoji list (strip wikilinks, blank lines between)
 {
+  assert(stripWikiLinks("[[npc_kira|Kira]]") === "Kira", "wikilink alias kept");
+  assert(stripWikiLinks("[[Hidden Cave]]") === "Hidden Cave", "wikilink target kept");
+  assert(stripWikiLinks("Near [[loc_a|the altar]]") === "Near the altar", "inline wikilink stripped");
+
   const pois = locationPois({
     fields: {
-      pois: [{ name: "Counter" }, { title: "Back room" }, "Window ledge"]
+      pois: [
+        { name: "[[npc_guard|Counter]]" },
+        { title: "[[Back room]]" },
+        "Window ledge"
+      ]
     }
   });
   assert(pois.length === 3, `parse POI objects/strings (got ${pois.length})`);
   const text = formatPoisBulletList(pois);
-  assert(text.split("\n").length === 3, "POI bullet list has one line per POI");
-  assert(text.startsWith("• "), "POI lines are bullets");
+  assert(text.startsWith("📍 "), "POI lines use 📍 emoji");
+  assert(!text.includes("[["), "POI drawing text has no wikilink brackets");
+  assert(text.includes("📍 Counter"), "alias text after strip");
+  assert(text.includes("📍 Back room"), "bare wikilink becomes label");
+  assert(text.split("\n\n").length === 3, "blank line between each POI");
+  assert(!text.includes("•"), "no classic bullet characters");
   assert(locationPois({ fields: { appearance: "only appearance" } }).length === 0, "no POIs when absent");
 }
 
