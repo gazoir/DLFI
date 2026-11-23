@@ -481,6 +481,8 @@ export async function importSessionPackage(loaded, options = {}) {
       [FLAG_SCOPE]: {
         kind: "landing",
         importKey,
+        /** Hide Active Effect icons on Landing tokens (sheet/nameplate stay). */
+        hideTokenEffects: true,
         landingArt: {
           background: landingArt.background,
           logoBurn: landingArt.logoBurn,

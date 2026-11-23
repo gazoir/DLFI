@@ -215,13 +215,24 @@ export async function activateImportedSession(sessionCode, world = game) {
   };
 }
 
-function findSession(sessionCode, world = game) {
+export function findSession(sessionCode, world = game) {
   const liveKey = setting(SETTING_LIVE_SESSION);
   return (
     groupSessionFolders([...(world.folders ?? [])], { liveKey }).find(
       (session) => session.sessionCode === sessionCode
     ) ?? null
   );
+}
+
+/** Seated PC actors for the currently Live imported session (or empty). */
+export function liveSessionPcActors(world = game) {
+  const liveKey = setting(SETTING_LIVE_SESSION);
+  const sessions = groupSessionFolders([...(world.folders ?? [])], { liveKey });
+  const live = sessions.find((session) => isLiveSession(liveKey, session.sessionCode));
+  if (!live) {
+    return [];
+  }
+  return collectSessionDocuments(live, world).pcs;
 }
 
 async function deleteIds(documentClass, docs) {

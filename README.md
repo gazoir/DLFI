@@ -4,13 +4,16 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.36`)
+## Status (`0.1.37`)
+
+- **0.1.37:** Player login gate toolbar 🔒/🔓 (Player → None + `_` name when locked; session players restored when unlocked; Trusted Player untouched); blank passwords on create; hide Active Effect icons on Landing scenes
+
 
 Working in this slice:
 
 - **Damned Lucky** top-level scene control (+ Configure Settings menu) → modal tabs Sessions (default) | Import | Pack, plus **Players**
 - **Sessions**: 4-column artwork grid (Landing Clean / session art), Activate soft-seats players, select/delete from tiles
-- **Soft-seat Players**: on Activate / Import, upsert Foundry Users from `flags.dlfi.playerId` / `playerName` (managed accounts, one-time temp passwords, hide unused with role NONE — never delete); Players UI assigns PC + Show/Hide
+- **Soft-seat Players**: on Activate / Import, upsert Foundry Users from `flags.dlfi.playerId` / `playerName` (blank password, managed flag — never delete); toolbar **🔒/🔓** locks all Player-role accounts (None + `_` name) or unlocks Live-session players; Trusted Player untouched; Players UI assigns PC + Show/Hide
 - **Import**: scan `Data/dlce-inbox` (setting), list sessions by latest export date with Landing/session thumbnails, version dropdown, Load; path frames below the list; modal ~960px
 - **Choose zip…** for a local DLCE export without the inbox
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
