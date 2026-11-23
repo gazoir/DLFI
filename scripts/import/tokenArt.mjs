@@ -15,12 +15,29 @@ export const TOKEN_DISPLAY_HOVER = 30;
 /** Foundry CONST.TOKEN_DISPLAY_MODES.ALWAYS — "Always Displayed". */
 export const TOKEN_DISPLAY_ALWAYS = 50;
 
+/** Health Estimate module flag namespace on Token documents. */
+export const HEALTH_ESTIMATE_FLAG = "healthEstimate";
+
 export function tokenDisplayHover() {
   return globalThis.CONST?.TOKEN_DISPLAY_MODES?.HOVER ?? TOKEN_DISPLAY_HOVER;
 }
 
 export function tokenDisplayAlways() {
   return globalThis.CONST?.TOKEN_DISPLAY_MODES?.ALWAYS ?? TOKEN_DISPLAY_ALWAYS;
+}
+
+/**
+ * Health Estimate module: hide (or show) the estimate overlay for players.
+ * Locations + Landing → hide; battlemaps → show.
+ * @param {boolean} hide
+ * @returns {{ healthEstimate: { hideHealthEstimate: boolean } }}
+ */
+export function healthEstimateTokenFlags(hide) {
+  return {
+    [HEALTH_ESTIMATE_FLAG]: {
+      hideHealthEstimate: Boolean(hide)
+    }
+  };
 }
 
 export function isWildcardPath(path) {
