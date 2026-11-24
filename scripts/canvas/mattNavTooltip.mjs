@@ -135,7 +135,10 @@ export function clientToCanvasPoint(canvas, clientX, clientY) {
 }
 
 /**
- * Axis-aligned bounds for a tile placeable / document.
+ * Axis-aligned bounds for a nav tile.
+ * Foundry V13+ TileDocument x/y is the mesh origin (texture.anchor, usually 0.5
+ * = centre). Treating x/y as top-left makes the hit box extend right and below
+ * the visible art — use anchor-aware edges only (ignore inflated placeable.bounds).
  * @param {object} tile
  * @returns {{ x: number, y: number, x2: number, y2: number }|null}
  */
@@ -148,25 +151,28 @@ export function mattNavTileBounds(tile) {
   if (kind !== "matt-nav-left" && kind !== "matt-nav-right") {
     return null;
   }
-  // Prefer live placeable bounds when available (accounts for canvas transforms).
-  const bounds = tile?.bounds;
-  if (bounds && Number.isFinite(bounds.x) && Number.isFinite(bounds.width)) {
-    return {
-      x: bounds.x,
-      y: bounds.y,
-      x2: bounds.x + bounds.width,
-      y2: bounds.y + bounds.height
-    };
+  let data = null;
+  try {
+    if (typeof doc.toObject === "function") {
+      data = doc.toObject();
+    }
+  } catch (_error) {
+    data = null;
   }
-  const src = doc._source ?? doc;
-  const x = Number(src.x ?? doc.x);
-  const y = Number(src.y ?? doc.y);
-  const w = Number(src.width ?? doc.width);
-  const h = Number(src.height ?? doc.height);
+  const src = data ?? doc._source ?? doc;
+  const x = Number(src.x);
+  const y = Number(src.y);
+  const w = Number(src.width);
+  const h = Number(src.height);
   if (![x, y, w, h].every((n) => Number.isFinite(n)) || w <= 0 || h <= 0) {
     return null;
   }
-  return { x, y, x2: x + w, y2: y + h };
+  const tex = src.texture ?? {};
+  const ax = Number.isFinite(Number(tex.anchorX)) ? Number(tex.anchorX) : 0.5;
+  const ay = Number.isFinite(Number(tex.anchorY)) ? Number(tex.anchorY) : 0.5;
+  const left = x - w * ax;
+  const top = y - h * ay;
+  return { x: left, y: top, x2: left + w, y2: top + h };
 }
 
 /**
