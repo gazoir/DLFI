@@ -6,6 +6,7 @@ Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLC
 
 ## Status (`0.1.48`)
 
+- **0.1.48:** Scene Directory thumbnails regenerated (`createThumbnail` + `thumb`) for every imported scene after background apply
 - **0.1.47:** Nav hover hit-boxes use Foundry V13 centre-origin (anchor 0.5) so zones match visible thumbs; NPC faces follow hand-tuned rules (72px @ 1.2×, bottom-centred on parent)
 - **0.1.46:** Nav hover on Token layer; right nav shows all battlemaps (linked first)
 - **0.1.45:** Session delete clears Item Pile actors; Landing nav thumb uses Logo_Burn
