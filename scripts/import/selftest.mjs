@@ -633,8 +633,13 @@ for (const path of paths) {
   ];
   assert(
     rightNavWindow(maps, { kind: "location", dlceId: "loc_a" }).map((r) => r.sceneId).join(",") ===
-      "b1,b2",
-    "location right nav prefers linked battlemaps"
+      "b1,b2,b3,b4,b5,b6",
+    "location right nav shows all maps (linked first)"
+  );
+  assert(
+    rightNavWindow(maps, { kind: "location", dlceId: "loc_a" })[0].sceneId === "b1" &&
+      rightNavWindow(maps, { kind: "location", dlceId: "loc_a" })[2].sceneId === "b3",
+    "linked maps listed before the rest"
   );
   assert(
     rightNavWindow(maps, { kind: "landing" }).map((r) => r.sceneId).join(",") ===
@@ -740,43 +745,74 @@ for (const path of paths) {
   assert(faces.length === 3, "three face tiles under thumb");
   assert(faces[0].flags.dlfi.kind === "matt-nav-face", "face tile flagged");
   const faceSize = faces[0].width;
-  const faceScale = faces[0].texture.scaleX;
-  assert(faceScale === 1.2, "face texture scaled 1.2× for token ring");
-  // Visible bottom = y + size + overflow; overflow = size*(scale-1)/2 → y = parent.y + ph - size - overflow
-  const overflow = (faceSize * (faceScale - 1)) / 2;
-  const expectedFaceY = Math.round(200 + 252 - faceSize - overflow);
-  assert(faces[0].y === expectedFaceY, `faces sit on thumb bottom (got ${faces[0].y}, want ${expectedFaceY})`);
+  assert(faces[0].texture.scaleX === 1, "face texture unscaled (box is the visual size)");
+  // Bottom of face = parent bottom - inset
+  const expectedFaceY = Math.round(200 + 252 - faceSize - 4);
+  assert(faces[0].y === expectedFaceY, `faces sit above thumb bottom (got ${faces[0].y}, want ${expectedFaceY})`);
+  assert(faces[0].y + faces[0].height <= 200 + 252, "face fully inside thumb vertically");
   assert(faces[0].texture.src === "tokens/a.webp", "face uses token art");
-  const rowWidth = 3 * faceSize + 2 * 6;
+  const rowWidth = 3 * faceSize + 2 * 4;
   const expectedStartX = Math.round(100 + (448 - rowWidth) / 2);
   assert(faces[0].x === expectedStartX, `face row centered (got ${faces[0].x}, want ${expectedStartX})`);
+  assert(faces[0].x >= 100, "face left edge inside thumb");
+  assert(faces[2].x + faces[2].width <= 100 + 448, "face right edge inside thumb");
 
-  // Foundry Documents do not enumerate x/y/w/h — spread must not be used.
+  // Prefer toObject() / _source over PIXI display sizes.
   const ghostDoc = {
     id: "ghost",
+    _source: { x: 500, y: 600, width: 448, height: 252, sort: 2 },
+    // Misleading PIXI-like getters (texture pixels) — must be ignored.
     get x() {
-      return 500;
+      return 0;
     },
     get y() {
-      return 600;
+      return 0;
     },
     get width() {
-      return 448;
+      return 1920;
     },
     get height() {
-      return 252;
+      return 1080;
     },
-    flags: { dlfi: { targetSceneId: "Scene.x" } }
+    flags: { dlfi: { targetSceneId: "Scene.x" } },
+    toObject() {
+      return { ...this._source, flags: this.flags };
+    }
   };
   const { navTileGeometry } = await import("./mattSceneNav.mjs");
   const geom = navTileGeometry(ghostDoc);
-  assert(geom.x === 500 && geom.width === 448, "navTileGeometry reads Document getters");
+  assert(geom.x === 500 && geom.width === 448, "navTileGeometry prefers toObject over display getters");
   const fromGeom = buildNavFaceTiles(ghostDoc, [{ img: "t.webp", name: "A" }]);
   assert(
     fromGeom[0].x === Math.round(500 + (448 - fromGeom[0].width) / 2),
-    "single face centered on Document tile (getter geometry)"
+    "single face centered on Document tile (toObject geometry)"
   );
+  assert(fromGeom[0].y + fromGeom[0].height <= 600 + 252, "face stays above bottom from toObject geom");
   assert(tokenActorId({ actorId: "abc" }) === "abc", "tokenActorId reads actorId");
+
+  const {
+    findMattNavTileAt,
+    mattNavTileBounds
+  } = await import("../canvas/mattNavTooltip.mjs");
+  const tipTile = {
+    document: {
+      name: "02. 📍 Dock",
+      sort: 1,
+      flags: { dlfi: { kind: "matt-nav-left" } },
+      _source: { x: 100, y: 200, width: 448, height: 252 }
+    },
+    bounds: { x: 100, y: 200, width: 448, height: 252 }
+  };
+  assert(mattNavTileBounds(tipTile)?.x === 100, "tooltip bounds from placeable");
+  assert(
+    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 120, 220)?.document?.name ===
+      "02. 📍 Dock",
+    "hit-test finds nav tile under cursor"
+  );
+  assert(
+    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 10, 10) == null,
+    "hit-test misses empty space"
+  );
 
   const { mattNavTooltipText } = await import("../canvas/mattNavTooltip.mjs");
   assert(

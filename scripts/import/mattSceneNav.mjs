@@ -21,13 +21,9 @@ export const LEFT_NAV_ROLL_FROM = 10;
 /** Max NPC token faces on a left nav thumbnail (locations only). */
 export const NAV_FACE_MAX = 5;
 /** Face size as a fraction of the parent thumb width. */
-export const NAV_FACE_SIZE_RATIO = 0.18;
-/**
- * Texture scale on face tiles. Token art frames read larger than the tile box;
- * overflow is centered, so we shift the box up so the visible circle sits on the
- * nav thumb's bottom edge.
- */
-export const NAV_FACE_TEXTURE_SCALE = 1.2;
+export const NAV_FACE_SIZE_RATIO = 0.2;
+/** Keep faces fully inside the thumb (px above the bottom edge). */
+export const NAV_FACE_BOTTOM_INSET = 4;
 
 /**
  * @returns {boolean}
@@ -61,7 +57,8 @@ export function leftNavWindow(targets, currentIndex, slots = LEFT_NAV_SLOTS) {
 }
 
 /**
- * Cap battlemap targets for the right strip (prefer linked, then session order).
+ * Battlemap targets for the right strip — always show every map (up to `slots`).
+ * On a location, linked maps are listed first, then the rest in session order.
  * @param {object[]} battlemaps
  * @param {{ kind?: string, dlceId?: string|null }} current
  * @param {number} [slots]
@@ -72,10 +69,16 @@ export function rightNavWindow(battlemaps, current = {}, slots = RIGHT_NAV_SLOTS
     return [];
   }
   if (current.kind === "location" && current.dlceId) {
-    const linked = list.filter((row) => row.hostLocationId === current.dlceId);
-    if (linked.length) {
-      return linked.slice(0, slots);
+    const linked = [];
+    const rest = [];
+    for (const row of list) {
+      if (row.hostLocationId === current.dlceId) {
+        linked.push(row);
+      } else {
+        rest.push(row);
+      }
     }
+    return [...linked, ...rest].slice(0, slots);
   }
   return list.slice(0, slots);
 }
@@ -173,32 +176,42 @@ export function sceneArtSrc(scene) {
 }
 
 /**
- * Read tile geometry without object-spread (Foundry Documents do not enumerate x/y/w/h).
+ * Read tile scene geometry. Prefer `toObject()` / `_source` so we never pick up
+ * PIXI display sizes (which can be texture-pixel dimensions and shift faces).
  * @param {object} tile
  * @returns {{ id: string|null, x: number, y: number, width: number, height: number, sort: number, flags: object }}
  */
 export function navTileGeometry(tile) {
-  const src = tile?._source ?? tile;
-  const x = Number(tile?.x ?? src?.x);
-  const y = Number(tile?.y ?? src?.y);
-  const width = Number(tile?.width ?? src?.width);
-  const height = Number(tile?.height ?? src?.height);
-  const sort = Number(tile?.sort ?? src?.sort);
+  const doc = tile?.document ?? tile;
+  let data = null;
+  try {
+    if (typeof doc?.toObject === "function") {
+      data = doc.toObject();
+    }
+  } catch (_error) {
+    data = null;
+  }
+  const src = data ?? doc?._source ?? doc ?? {};
+  const x = Number(src.x);
+  const y = Number(src.y);
+  const width = Number(src.width);
+  const height = Number(src.height);
+  const sort = Number(src.sort);
   return {
-    id: tile?.id ?? tile?._id ?? src?._id ?? null,
+    id: doc?.id ?? doc?._id ?? src?._id ?? null,
     x: Number.isFinite(x) ? x : 0,
     y: Number.isFinite(y) ? y : 0,
     width: Number.isFinite(width) && width > 0 ? width : 1,
     height: Number.isFinite(height) && height > 0 ? height : 1,
     sort: Number.isFinite(sort) ? sort : 0,
-    flags: tile?.flags ?? src?.flags ?? {}
+    flags: doc?.flags ?? src?.flags ?? {}
   };
 }
 
 /**
  * Layout small token-art faces along the bottom edge of a left nav thumbnail:
- * horizontally centered; visible circle (at {@link NAV_FACE_TEXTURE_SCALE}) sits
- * on the thumb's bottom edge.
+ * horizontally centered, fully inside the thumb (bottom edge of face on/above
+ * the nav tile bottom border). No texture scale — box size is the visual size.
  * @param {object} parentTile
  * @param {Array<{ img: string, name?: string }>} faces
  * @returns {object[]} Tile create payloads
@@ -213,16 +226,17 @@ export function buildNavFaceTiles(parentTile, faces = []) {
   const parentId = geom.id;
   const pw = geom.width;
   const ph = geom.height;
-  const size = Math.max(28, Math.min(72, Math.floor(pw * NAV_FACE_SIZE_RATIO)));
-  const gap = 6;
+  // Cap face size so a row of NAV_FACE_MAX still fits inside the thumb.
+  const size = Math.max(
+    28,
+    Math.min(72, Math.floor(pw * NAV_FACE_SIZE_RATIO), Math.floor((pw - 8) / max))
+  );
+  const gap = 4;
   const total = max * size + (max - 1) * gap;
-  // Center the face row in the thumb.
-  const startX = geom.x + Math.max(0, (pw - total) / 2);
-  // Texture scale >1 overflows equally; raise the box so the visible bottom
-  // edge lands on the nav tile bottom (overflow = size * (scale - 1) / 2).
-  const overflow = (size * (NAV_FACE_TEXTURE_SCALE - 1)) / 2;
-  const y = geom.y + ph - size - overflow;
-  const sort = geom.sort + 1;
+  const startX = geom.x + (pw - total) / 2;
+  // Bottom of face tile == bottom of nav tile, then nudge up by inset.
+  const y = geom.y + ph - size - NAV_FACE_BOTTOM_INSET;
+  const sort = geom.sort + 10;
   /** @type {object[]} */
   const created = [];
   for (let i = 0; i < max; i += 1) {
@@ -240,8 +254,9 @@ export function buildNavFaceTiles(parentTile, faces = []) {
       sort,
       texture: {
         src: face.img,
-        scaleX: NAV_FACE_TEXTURE_SCALE,
-        scaleY: NAV_FACE_TEXTURE_SCALE
+        scaleX: 1,
+        scaleY: 1,
+        fit: "contain"
       },
       flags: {
         [FLAG_SCOPE]: {
@@ -292,8 +307,8 @@ export async function populateMattSceneNav(scene, targets = {}) {
   const updates = [];
   /** @type {string[]} */
   const deleteIds = [...listMattNavFaceTileIds(scene)];
-  /** @type {object[]} */
-  const faceCreates = [];
+  /** @type {Array<{ tileId: string, faces: object[] }>} */
+  const pendingFaces = [];
 
   const assign = (slots, rows, side) => {
     for (let i = 0; i < slots.length; i += 1) {
@@ -307,21 +322,9 @@ export async function populateMattSceneNav(scene, targets = {}) {
         deleteIds.push(id);
         continue;
       }
-      const patch = mattTileUpdate(tile, row, side);
-      updates.push(patch);
-      if (side === "left") {
-        // Explicit geometry — never object-spread Foundry Documents (x/y/w/h vanish).
-        const geom = navTileGeometry(tile);
-        const parentForFaces = {
-          id,
-          x: geom.x,
-          y: geom.y,
-          width: geom.width,
-          height: geom.height,
-          sort: geom.sort,
-          flags: patch.flags
-        };
-        faceCreates.push(...buildNavFaceTiles(parentForFaces, row.faces ?? []));
+      updates.push(mattTileUpdate(tile, row, side));
+      if (side === "left" && Array.isArray(row.faces) && row.faces.length) {
+        pendingFaces.push({ tileId: id, faces: row.faces });
       }
     }
   };
@@ -334,6 +337,25 @@ export async function populateMattSceneNav(scene, targets = {}) {
   }
   if (deleteIds.length) {
     await scene.deleteEmbeddedDocuments("Tile", [...new Set(deleteIds)]);
+  }
+
+  // Build faces from the live TileDocument after updates (authoritative x/y/w/h).
+  /** @type {object[]} */
+  const faceCreates = [];
+  for (const pending of pendingFaces) {
+    const live =
+      scene.tiles?.get?.(pending.tileId) ??
+      [...(scene.tiles?.contents ?? [])].find((t) => (t.id ?? t._id) === pending.tileId) ??
+      null;
+    if (!live) {
+      continue;
+    }
+    const geom = navTileGeometry(live);
+    console.log(
+      `${MODULE_ID} | nav faces on ${scene.name}: parent=${pending.tileId}` +
+        ` @ ${geom.x},${geom.y} ${geom.width}x${geom.height} (n=${pending.faces.length})`
+    );
+    faceCreates.push(...buildNavFaceTiles(live, pending.faces));
   }
   if (faceCreates.length) {
     await scene.createEmbeddedDocuments("Tile", faceCreates);
