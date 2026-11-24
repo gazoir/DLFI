@@ -1,26 +1,29 @@
 /**
  * Monk's Active Tile Triggers — scene navigation strips on Location / Landing / Outro.
  *
- * Expo Location template: ~14 landscape tiles in left padding (locations + Landing + Outro),
- * ~4 portrait tiles in right padding (battlemaps). Click → view target scene (GM).
+ * Expo Location template: ~22 landscape tiles (left/bottom padding) for
+ * Landing → locations → Outro; ~6 portrait tiles (right padding) for battlemaps.
+ * Click → view target scene (GM). Hover shows scene name via DLFI tooltip hook.
  *
  * Left list order: Landing → locations (MSD order) → Outro.
- * When more than 14 targets, each scene gets a rolling window that starts shifting
- * from Scene 7 (1-based): Scene 7 drops Landing and gains scene 15, etc.
+ * When more than 22 targets, each scene gets a rolling window that starts shifting
+ * from Scene 10 (1-based).
  */
 
 import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
 import { sceneCanvasMetrics } from "./scenePlacement.mjs";
 
 export const MONKS_ACTIVE_TILES_ID = "monks-active-tiles";
-export const LEFT_NAV_SLOTS = 14;
-export const RIGHT_NAV_SLOTS = 4;
-/** 1-based index where the left rolling window begins (Scene 7). */
-export const LEFT_NAV_ROLL_FROM = 7;
-/** Max NPC/PC token faces under a left nav thumbnail. */
+export const LEFT_NAV_SLOTS = 22;
+export const RIGHT_NAV_SLOTS = 6;
+/** 1-based index where the left rolling window begins (Scene 10). */
+export const LEFT_NAV_ROLL_FROM = 10;
+/** Max NPC token faces on a left nav thumbnail (locations only). */
 export const NAV_FACE_MAX = 5;
 /** Face size as a fraction of the parent thumb width. */
-export const NAV_FACE_SIZE_RATIO = 0.2;
+export const NAV_FACE_SIZE_RATIO = 0.18;
+/** Inset from the thumb bottom edge so faces sit on the artwork, not below it. */
+export const NAV_FACE_BOTTOM_INSET = 10;
 
 /**
  * @returns {boolean}
@@ -46,7 +49,7 @@ export function leftNavWindow(targets, currentIndex, slots = LEFT_NAV_SLOTS) {
   const index = Math.max(0, Math.min(Number(currentIndex) || 0, n - 1));
   let start = 0;
   if (index >= LEFT_NAV_ROLL_FROM - 1) {
-    // Scene 7 (i=6) → start 1; Scene 8 → start 2; …
+    // Scene 10 (i=9) → start 1; Scene 11 → start 2; …
     start = index - (LEFT_NAV_ROLL_FROM - 2);
   }
   start = Math.min(start, Math.max(0, n - slots));
@@ -83,31 +86,18 @@ export function isMattTriggerTile(tile) {
 }
 
 /**
- * Left padding = landscape nav; right padding = portrait battlemap nav.
+ * Landscape MATT tiles → location nav (left/bottom); portrait → battlemap nav (right).
+ * Prefer aspect over x so bottom-row location thumbs under the map art still count as left.
  * @param {object} tile
- * @param {ReturnType<typeof sceneCanvasMetrics>} metrics
+ * @param {ReturnType<typeof sceneCanvasMetrics>} [_metrics]
  * @returns {"left"|"right"|null}
  */
-export function classifyMattNavSide(tile, metrics) {
+export function classifyMattNavSide(tile, _metrics) {
   if (!isMattTriggerTile(tile)) {
     return null;
   }
-  const x = Number(tile.x) || 0;
   const w = Math.max(1, Number(tile.width) || 1);
   const h = Math.max(1, Number(tile.height) || 1);
-  const cx = x + w / 2;
-  const mapLeft = Number(metrics?.sceneX) || 0;
-  const mapRight = mapLeft + (Number(metrics?.sceneWidth) || 0);
-
-  if (mapRight > mapLeft) {
-    if (cx < mapLeft) {
-      return "left";
-    }
-    if (cx > mapRight) {
-      return "right";
-    }
-  }
-  // Fallback: landscape → left strip, portrait → right strip.
   return w >= h ? "left" : "right";
 }
 
@@ -179,7 +169,8 @@ export function sceneArtSrc(scene) {
 }
 
 /**
- * Layout small token-art faces under a left nav thumbnail (MSD-style roster strip).
+ * Layout small token-art faces along the bottom edge of a left nav thumbnail
+ * (inside the art, centered — matches the Expo strip look).
  * @param {object} parentTile
  * @param {Array<{ img: string, name?: string }>} faces
  * @returns {object[]} Tile create payloads
@@ -192,11 +183,16 @@ export function buildNavFaceTiles(parentTile, faces = []) {
   }
   const parentId = parentTile.id ?? parentTile._id ?? null;
   const pw = Math.max(1, Number(parentTile.width) || 1);
-  const size = Math.max(24, Math.floor(pw * NAV_FACE_SIZE_RATIO));
-  const gap = 4;
+  const ph = Math.max(1, Number(parentTile.height) || 1);
+  const size = Math.max(28, Math.min(72, Math.floor(pw * NAV_FACE_SIZE_RATIO)));
+  const gap = 6;
   const total = max * size + (max - 1) * gap;
   const startX = Number(parentTile.x) + Math.max(0, (pw - total) / 2);
-  const y = Number(parentTile.y) + Number(parentTile.height) + 6;
+  // Sit on the bottom of the thumb artwork (not in the gap below the tile).
+  const y =
+    Number(parentTile.y) + ph - size - NAV_FACE_BOTTOM_INSET;
+  const parentSort = Number(parentTile.sort);
+  const sort = Number.isFinite(parentSort) ? parentSort + 1 : 100;
   /** @type {object[]} */
   const created = [];
   for (let i = 0; i < max; i += 1) {
@@ -211,6 +207,7 @@ export function buildNavFaceTiles(parentTile, faces = []) {
       alpha: 1,
       hidden: false,
       locked: false,
+      sort,
       texture: { src: face.img },
       flags: {
         [FLAG_SCOPE]: {

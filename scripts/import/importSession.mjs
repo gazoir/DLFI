@@ -1031,10 +1031,6 @@ export async function importSessionPackage(loaded, options = {}) {
       }
       return { img: String(img), name: String(actor.name || "").trim() || "NPC" };
     };
-    const partyFaces = sessionPcs
-      .map((row) => faceFromActor(row?.actor))
-      .filter(Boolean);
-
     const locationRows = [];
     for (const step of sceneSequence) {
       if (step.kind !== "location") {
@@ -1074,7 +1070,7 @@ export async function importSessionPackage(loaded, options = {}) {
         name: landingScene.name,
         img: landingImg,
         kind: "landing",
-        faces: partyFaces
+        faces: []
       });
     }
     for (const row of locationRows) {
@@ -1101,7 +1097,7 @@ export async function importSessionPackage(loaded, options = {}) {
         name: outroScene.name,
         img: outroImg,
         kind: "outro",
-        faces: partyFaces
+        faces: []
       });
     }
     const battleNav = battlemapMeta.map((meta) => ({

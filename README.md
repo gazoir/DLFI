@@ -4,9 +4,10 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.43`)
+## Status (`0.1.44`)
 
-- **0.1.43:** Special page names (`00. CODE Landing Page`, Outro/Leftovers after last MSD #); MATT nav tile names + pointer cursor; NPC/PC token-art face strip under left thumbs
+- **0.1.44:** MATT nav: 22 left / 6 right slots, roll from Scene 10; hover scene-name tooltip; NPC faces bottom-centered on location thumbs only (not Landing/Outro)
+- **0.1.43:** Special page names (`00. CODE Landing Page`, Outro/Leftovers after last MSD #); MATT nav tile names + pointer cursor; NPC token-art faces on location thumbs
 - **0.1.42:** Monk's Active Tile Triggers scene nav on Location/Landing/Outro (left: Landing→locations→Outro with rolling window; right: battlemaps); Outro Page Template setting
 - **0.1.41:** Location POI drawings: strip `[[wikilinks]]`, 📍 bullets, blank line between entries
 - **0.1.40:** Health Estimate: hide on Location NPCs + Landing; show on all battlemap tokens
@@ -25,7 +26,7 @@ Working in this slice:
 - Creates world folders `{DisplayCode} · {Session Name}` for Actors / Items / Scenes / Journals
 - Uploads package assets under `Data/dlfi-imports/…` (plus top-level `Landing Page/` slides)
 - Location / Landing / Outro / Battlemap / Leftovers scenes (configured templates, or bundled Expo/Landing/Battlemap defaults when unset; Outro uses the **Outro page scene template** setting)
-- **MATT scene nav** (requires Monk's Active Tile Triggers): on Location / Landing / Outro, left padding tiles → Landing → locations → Outro (rolling window from Scene 7 when >14); right portrait tiles → battlemaps (prefer location-linked); unused placeholders deleted
+- **MATT scene nav** (requires Monk's Active Tile Triggers): on Location / Landing / Outro, left/bottom landscape tiles (22) → Landing → locations → Outro (rolling from Scene 10 when >22); right portrait tiles (6, 320×440) → battlemaps; hover shows scene name; location thumbs get bottom-centered NPC token faces; unused placeholders deleted
 - **MSD scene order:** location + combat battlemap scenes share one sequence (`01. 📍 Name`, `02. ⚔️ Name`) from unified `msdOrder` when present, else locations then linked combats (including reverse location→challenge hosts); non-combat challenges excluded
 - **Battlemap backgrounds:** resolve colour maps from `assets/location/battlemaps/{locationId}` (DLCE v2) via host location, not only legacy `assets/battlemaps/`
 - **MSD journal:** package HTML → Foundry single-column page (location + challenge `<h2>` for ToC, `../assets/…` → uploaded world paths, `@UUID` links); see `docs/DLCE_AGENT_BRIEF_MSD_FOUNDRY.md`
