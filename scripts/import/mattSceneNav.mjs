@@ -17,6 +17,10 @@ export const LEFT_NAV_SLOTS = 14;
 export const RIGHT_NAV_SLOTS = 4;
 /** 1-based index where the left rolling window begins (Scene 7). */
 export const LEFT_NAV_ROLL_FROM = 7;
+/** Max NPC/PC token faces under a left nav thumbnail. */
+export const NAV_FACE_MAX = 5;
+/** Face size as a fraction of the parent thumb width. */
+export const NAV_FACE_SIZE_RATIO = 0.2;
 
 /**
  * @returns {boolean}
@@ -175,22 +179,80 @@ export function sceneArtSrc(scene) {
 }
 
 /**
+ * Layout small token-art faces under a left nav thumbnail (MSD-style roster strip).
+ * @param {object} parentTile
+ * @param {Array<{ img: string, name?: string }>} faces
+ * @returns {object[]} Tile create payloads
+ */
+export function buildNavFaceTiles(parentTile, faces = []) {
+  const list = (faces ?? []).filter((face) => face?.img);
+  const max = Math.min(NAV_FACE_MAX, list.length);
+  if (!max || !parentTile) {
+    return [];
+  }
+  const parentId = parentTile.id ?? parentTile._id ?? null;
+  const pw = Math.max(1, Number(parentTile.width) || 1);
+  const size = Math.max(24, Math.floor(pw * NAV_FACE_SIZE_RATIO));
+  const gap = 4;
+  const total = max * size + (max - 1) * gap;
+  const startX = Number(parentTile.x) + Math.max(0, (pw - total) / 2);
+  const y = Number(parentTile.y) + Number(parentTile.height) + 6;
+  /** @type {object[]} */
+  const created = [];
+  for (let i = 0; i < max; i += 1) {
+    const face = list[i];
+    created.push({
+      name: String(face.name || "NPC").trim() || "NPC",
+      x: Math.round(startX + i * (size + gap)),
+      y: Math.round(y),
+      width: size,
+      height: size,
+      rotation: 0,
+      alpha: 1,
+      hidden: false,
+      locked: false,
+      texture: { src: face.img },
+      flags: {
+        [FLAG_SCOPE]: {
+          kind: "matt-nav-face",
+          parentTileId: parentId,
+          targetSceneId: parentTile.flags?.[FLAG_SCOPE]?.targetSceneId ?? null
+        }
+      }
+    });
+  }
+  return created;
+}
+
+/**
+ * @param {Scene} scene
+ * @returns {string[]}
+ */
+export function listMattNavFaceTileIds(scene) {
+  const tiles = [...(scene?.tiles?.contents ?? scene?.tiles ?? [])];
+  return tiles
+    .filter((tile) => tile?.flags?.[FLAG_SCOPE]?.kind === "matt-nav-face")
+    .map((tile) => tile.id ?? tile._id)
+    .filter(Boolean);
+}
+
+/**
  * Populate MATT nav tiles on one scene; delete unused placeholders.
  *
  * @param {Scene} scene
  * @param {{
- *   leftTargets: Array<{ sceneId: string, name: string, img?: string|null, kind?: string }>,
+ *   leftTargets: Array<{ sceneId: string, name: string, img?: string|null, kind?: string, faces?: Array<{img:string,name?:string}> }>,
  *   rightTargets: Array<{ sceneId: string, name: string, img?: string|null, kind?: string }>
  * }} targets
- * @returns {Promise<{ updated: number, deleted: number }>}
+ * @returns {Promise<{ updated: number, deleted: number, faces: number }>}
  */
 export async function populateMattSceneNav(scene, targets = {}) {
   if (!scene) {
-    return { updated: 0, deleted: 0 };
+    return { updated: 0, deleted: 0, faces: 0 };
   }
   const { left, right } = listMattNavTiles(scene);
   if (!left.length && !right.length) {
-    return { updated: 0, deleted: 0 };
+    return { updated: 0, deleted: 0, faces: 0 };
   }
 
   const leftTargets = targets.leftTargets ?? [];
@@ -198,7 +260,9 @@ export async function populateMattSceneNav(scene, targets = {}) {
   /** @type {object[]} */
   const updates = [];
   /** @type {string[]} */
-  const deleteIds = [];
+  const deleteIds = [...listMattNavFaceTileIds(scene)];
+  /** @type {object[]} */
+  const faceCreates = [];
 
   const assign = (slots, rows, side) => {
     for (let i = 0; i < slots.length; i += 1) {
@@ -212,7 +276,17 @@ export async function populateMattSceneNav(scene, targets = {}) {
         deleteIds.push(id);
         continue;
       }
-      updates.push(mattTileUpdate(tile, row, side));
+      const patch = mattTileUpdate(tile, row, side);
+      updates.push(patch);
+      if (side === "left") {
+        // Faces use post-update targetSceneId via flags on the patch.
+        const parentForFaces = {
+          ...tile,
+          id,
+          flags: patch.flags
+        };
+        faceCreates.push(...buildNavFaceTiles(parentForFaces, row.faces ?? []));
+      }
     }
   };
 
@@ -225,7 +299,10 @@ export async function populateMattSceneNav(scene, targets = {}) {
   if (deleteIds.length) {
     await scene.deleteEmbeddedDocuments("Tile", [...new Set(deleteIds)]);
   }
-  return { updated: updates.length, deleted: deleteIds.length };
+  if (faceCreates.length) {
+    await scene.createEmbeddedDocuments("Tile", faceCreates);
+  }
+  return { updated: updates.length, deleted: deleteIds.length, faces: faceCreates.length };
 }
 
 /**
@@ -236,8 +313,11 @@ export async function populateMattSceneNav(scene, targets = {}) {
 export function mattTileUpdate(tile, target, side) {
   const id = tile.id ?? tile._id;
   const existing = tile.flags?.[MONKS_ACTIVE_TILES_ID] ?? {};
+  const sceneName = String(target.name || "").trim() || "Scene";
   const patch = {
     _id: id,
+    // Foundry tile name — shown in Tile HUD / config; pairs with pointer cursor.
+    name: sceneName,
     flags: {
       ...(tile.flags ?? {}),
       [FLAG_SCOPE]: {
@@ -255,13 +335,14 @@ export function mattTileUpdate(tile, target, side) {
         trigger: Array.isArray(existing.trigger) ? existing.trigger : ["click"],
         allowpaused: existing.allowpaused ?? false,
         usealpha: existing.usealpha ?? false,
-        pointer: existing.pointer ?? false,
+        // Hand cursor on hover so the strip feels clickable.
+        pointer: true,
         vision: existing.vision ?? false,
         pertoken: existing.pertoken ?? false,
         actions: [
           buildMattSceneAction({
             id: target.sceneId,
-            name: target.name
+            name: sceneName
           })
         ],
         files: existing.files ?? []
@@ -316,9 +397,10 @@ export async function populateAllMattSceneNav(opts) {
     });
     updated += result.updated;
     deleted += result.deleted;
-    if (result.updated || result.deleted) {
+    if (result.updated || result.deleted || result.faces) {
       console.log(
         `${MODULE_ID} | ${row.scene.name}: MATT nav tiles updated=${result.updated} deleted=${result.deleted}` +
+          ` faces=${result.faces}` +
           ` (left ${left.length}/${LEFT_NAV_SLOTS}, right ${right.length}/${RIGHT_NAV_SLOTS})`
       );
     }

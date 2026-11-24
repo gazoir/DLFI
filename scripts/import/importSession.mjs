@@ -62,8 +62,10 @@ import { populateAllMattSceneNav, sceneArtSrc } from "./mattSceneNav.mjs";
 import { softSeatPlayersFromImport } from "./softSeatPlayers.mjs";
 import {
   buildMsdSceneSequence,
-  formatSceneDmName
+  formatSceneDmName,
+  formatSpecialSceneName
 } from "./sceneOrder.mjs";
+import { pickTokenTexture } from "./tokenArt.mjs";
 import { convertMsdHtmlForFoundry } from "./msdJournal.mjs";
 import {
   bundledKindForSetting,
@@ -472,18 +474,25 @@ export async function importSessionPackage(loaded, options = {}) {
   // --- Landing ---
   // Clean = scene background; Logo Only / Title Only replace named template tiles.
   const landingArt = resolveLandingPageArt(manifest, uploaded);
+  const lastMsdOrder = sceneSequence.reduce(
+    (max, step) => Math.max(max, Number(step.order) || 0),
+    0
+  );
+  const landingName = formatSpecialSceneName("landing", manifest, lastMsdOrder);
+  const outroName = formatSpecialSceneName("outro", manifest, lastMsdOrder);
+  const leftoversName = formatSpecialSceneName("leftovers", manifest, lastMsdOrder);
   let landing =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, `${folderName} — Landing`, {
+    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, landingName, {
       folderId: folders.Scene?.id ?? null,
       flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
     })) ??
     (await Scene.create({
-      name: `${folderName} — Landing`,
+      name: landingName,
       navigation: true,
       folder: folders.Scene?.id ?? null
     }));
   await landing.update({
-    name: `${folderName} — Landing`,
+    name: landingName,
     navName: "",
     navigation: true,
     folder: folders.Scene?.id ?? null,
@@ -540,18 +549,18 @@ export async function importSessionPackage(loaded, options = {}) {
 
   // --- Outro (Thanks for Playing) — Landing-like; user owns the Thanks tile on the template ---
   let outro =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_OUTRO, `${folderName} — Outro`, {
+    (await duplicateTemplateScene(SETTING_TEMPLATE_OUTRO, outroName, {
       folderId: folders.Scene?.id ?? null,
       flags: { [FLAG_SCOPE]: { kind: "outro", importKey } }
     })) ??
     (await Scene.create({
-      name: `${folderName} — Outro`,
+      name: outroName,
       navigation: true,
       folder: folders.Scene?.id ?? null,
       flags: { [FLAG_SCOPE]: { kind: "outro", importKey } }
     }));
   await outro.update({
-    name: `${folderName} — Outro`,
+    name: outroName,
     navName: "",
     navigation: true,
     folder: folders.Scene?.id ?? null,
@@ -572,17 +581,17 @@ export async function importSessionPackage(loaded, options = {}) {
 
   // --- Leftovers (formerly Inbox): catch-all for unplaced NPCs/items ---
   let leftovers =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, `${folderName} — Leftovers`, {
+    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, leftoversName, {
       folderId: folders.Scene?.id ?? null,
       flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } }
     })) ??
     (await Scene.create({
-      name: `${folderName} — Leftovers`,
+      name: leftoversName,
       navigation: false,
       folder: folders.Scene?.id ?? null
     }));
   await leftovers.update({
-    name: `${folderName} — Leftovers`,
+    name: leftoversName,
     navName: "",
     navigation: false,
     folder: folders.Scene?.id ?? null,
@@ -1007,6 +1016,25 @@ export async function importSessionPackage(loaded, options = {}) {
   // Populate on Location / Landing / Outro only (not battlemaps / leftovers).
   {
     progress("populate MATT scene nav tiles");
+    /** @param {object|null|undefined} actor */
+    const faceFromActor = (actor) => {
+      if (!actor) {
+        return null;
+      }
+      const img =
+        pickTokenTexture(actor, undefined, FLAG_SCOPE) ||
+        actor?.prototypeToken?.texture?.src ||
+        actor?.img ||
+        null;
+      if (!img) {
+        return null;
+      }
+      return { img: String(img), name: String(actor.name || "").trim() || "NPC" };
+    };
+    const partyFaces = sessionPcs
+      .map((row) => faceFromActor(row?.actor))
+      .filter(Boolean);
+
     const locationRows = [];
     for (const step of sceneSequence) {
       if (step.kind !== "location") {
@@ -1016,18 +1044,22 @@ export async function importSessionPackage(loaded, options = {}) {
       if (!meta?.scene) {
         continue;
       }
+      const faces = (meta.npcs ?? [])
+        .map((row) => faceFromActor(row?.actor))
+        .filter(Boolean);
       locationRows.push({
         scene: meta.scene,
         kind: "location",
         dlceId: step.entry.id,
         img: meta.artwork || sceneArtSrc(meta.scene),
-        name: meta.scene.name
+        name: meta.scene.name,
+        faces
       });
     }
     const landingImg = landingArt.background || sceneArtSrc(landingScene);
     /** @type {Array<{ scene: object, kind: string, dlceId?: string|null, img?: string|null, name?: string }>} */
     const navScenes = [];
-    /** @type {Array<{ sceneId: string, name: string, img?: string|null, kind: string }>} */
+    /** @type {Array<{ sceneId: string, name: string, img?: string|null, kind: string, faces?: object[] }>} */
     const leftTargets = [];
     if (landingScene) {
       navScenes.push({
@@ -1041,7 +1073,8 @@ export async function importSessionPackage(loaded, options = {}) {
         sceneId: landingScene.id,
         name: landingScene.name,
         img: landingImg,
-        kind: "landing"
+        kind: "landing",
+        faces: partyFaces
       });
     }
     for (const row of locationRows) {
@@ -1050,7 +1083,8 @@ export async function importSessionPackage(loaded, options = {}) {
         sceneId: row.scene.id,
         name: row.name || row.scene.name,
         img: row.img,
-        kind: "location"
+        kind: "location",
+        faces: row.faces ?? []
       });
     }
     if (outroScene) {
@@ -1066,7 +1100,8 @@ export async function importSessionPackage(loaded, options = {}) {
         sceneId: outroScene.id,
         name: outroScene.name,
         img: outroImg,
-        kind: "outro"
+        kind: "outro",
+        faces: partyFaces
       });
     }
     const battleNav = battlemapMeta.map((meta) => ({

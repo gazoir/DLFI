@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.42`)
+## Status (`0.1.43`)
 
+- **0.1.43:** Special page names (`00. CODE Landing Page`, Outro/Leftovers after last MSD #); MATT nav tile names + pointer cursor; NPC/PC token-art face strip under left thumbs
 - **0.1.42:** Monk's Active Tile Triggers scene nav on Location/Landing/Outro (left: Landing→locations→Outro with rolling window; right: battlemaps); Outro Page Template setting
 - **0.1.41:** Location POI drawings: strip `[[wikilinks]]`, 📍 bullets, blank line between entries
 - **0.1.40:** Health Estimate: hide on Location NPCs + Landing; show on all battlemap tokens
