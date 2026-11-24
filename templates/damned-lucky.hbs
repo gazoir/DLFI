@@ -30,7 +30,7 @@
           <div class="dlfi-session-meta">
             <strong>{{displayCode}}{{#if isNew}} <span class="dlfi-new-badge" title="Newer than the version in Sessions">New</span>{{/if}}</strong>
             <span>{{sessionName}}</span>
-            <span class="notes">Party L{{partyLevel}}{{#if crLabel}} · CR {{crLabel}}{{/if}} · {{latestExportedAt}}</span>
+            <span class="notes">Party L{{partyLevel}}{{#if crLabel}} · CR {{crLabel}}{{/if}} · {{latestExportedAtLabel}}</span>
           </div>
           <button type="button" class="dlfi-load" data-action="loadVersion"
             data-session-code="{{sessionCode}}" data-exported-at="{{latestExportedAt}}"
@@ -43,7 +43,7 @@
             {{#each versions}}
             <option value="{{package.manifest.exportedAt}}"
               {{#if @first}}selected{{/if}}>
-              {{package.manifest.exportedAt}}
+              {{exportedAtLabel}}
             </option>
             {{/each}}
           </select>

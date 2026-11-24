@@ -483,6 +483,61 @@ for (const path of paths) {
 }
 
 {
+  const {
+    formatElapsedSince,
+    formatExportDate,
+    formatExportStamp,
+    decorateInboxSessionsForDisplay
+  } = await import("../ui/formatExportStamp.mjs");
+  const now = Date.parse("2026-11-24T18:10:35.914Z");
+  const stamp = "2026-11-24T16:10:35.914Z";
+  assert(formatExportDate(stamp).includes("2026"), "export date has year");
+  assert(formatExportDate(stamp).includes("November"), "export date has month name");
+  assert(formatElapsedSince(stamp, now) === "2 hours ago", "2 hours ago");
+  assert(
+    formatElapsedSince("2026-11-24T17:11:35.914Z", now) === "59 minutes ago",
+    "59 minutes ago"
+  );
+  assert(
+    formatElapsedSince("2026-11-21T18:10:35.914Z", now) === "3 days ago",
+    "3 days ago"
+  );
+  assert(
+    formatElapsedSince("2026-11-10T18:10:35.914Z", now) === "2 weeks ago",
+    "2 weeks ago"
+  );
+  assert(
+    formatElapsedSince("2026-08-24T18:10:35.914Z", now) === "3 months ago",
+    "3 months ago"
+  );
+  assert(
+    formatElapsedSince("2025-11-24T18:10:35.914Z", now) === "1 year ago",
+    "1 year ago"
+  );
+  assert(
+    formatExportStamp(stamp, now).endsWith(" - 2 hours ago"),
+    "stamp joins date and elapsed"
+  );
+  const rows = decorateInboxSessionsForDisplay(
+    [
+      {
+        latestExportedAt: stamp,
+        versions: [{ package: { manifest: { exportedAt: stamp } } }]
+      }
+    ],
+    now
+  );
+  assert(
+    rows[0].latestExportedAtLabel === formatExportStamp(stamp, now),
+    "decorates session label"
+  );
+  assert(
+    rows[0].versions[0].exportedAtLabel === formatExportStamp(stamp, now),
+    "decorates version label"
+  );
+}
+
+{
   const { applySceneBackground, refreshSceneThumbnail } = await import(
     "./applySceneBackground.mjs"
   );

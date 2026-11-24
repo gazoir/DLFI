@@ -24,6 +24,7 @@ import {
   loadPackageFromZipPath,
   markInboxSessionsNewerThanImported
 } from "../package/readPackage.mjs";
+import { decorateInboxSessionsForDisplay, formatExportStamp } from "./formatExportStamp.mjs";
 import { openPlayersApp } from "./PlayersApp.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
@@ -77,6 +78,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
   async _prepareContext() {
     if (this.#tab === "import" && this.#sessions.length) {
       markInboxSessionsNewerThanImported(this.#sessions, this.#imported);
+      decorateInboxSessionsForDisplay(this.#sessions);
     }
     return {
       tab: this.#tab,
@@ -342,7 +344,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       return;
     }
     this.#busy = true;
-    this.#status = `Importing ${session.displayCode} (${exportedAt})…`;
+    this.#status = `Importing ${session.displayCode} (${formatExportStamp(exportedAt)})…`;
     this.render();
     try {
       await importSessionPackage(version.package);
