@@ -20,10 +20,20 @@ export const RIGHT_NAV_SLOTS = 6;
 export const LEFT_NAV_ROLL_FROM = 10;
 /** Max NPC token faces on a left nav thumbnail (locations only). */
 export const NAV_FACE_MAX = 5;
-/** Face size as a fraction of the parent thumb width. */
-export const NAV_FACE_SIZE_RATIO = 0.2;
-/** Keep faces fully inside the thumb (px above the bottom edge). */
-export const NAV_FACE_BOTTOM_INSET = 4;
+/**
+ * Face tile size in scene pixels (matches hand-tuned Expo scene).
+ * Texture scale {@link NAV_FACE_TEXTURE_SCALE} draws the circular ring larger.
+ */
+export const NAV_FACE_SIZE = 72;
+/** Token-art scale on face tiles (hand-tuned: ring sits on the thumb bottom). */
+export const NAV_FACE_TEXTURE_SCALE = 1.2;
+/** Centre-to-centre spacing for a multi-face row (hand-tuned: ±60 from parent centre). */
+export const NAV_FACE_CENTER_SPACING = 120;
+/**
+ * Foundry V13+: TileDocument x/y is the mesh origin (texture.anchor). Expo nav
+ * tiles use anchor 0.5/0.5, so x/y is the centre of the rectangle — not top-left.
+ */
+export const NAV_TILE_ANCHOR = 0.5;
 
 /**
  * @returns {boolean}
@@ -177,9 +187,23 @@ export function sceneArtSrc(scene) {
 
 /**
  * Read tile scene geometry. Prefer `toObject()` / `_source` so we never pick up
- * PIXI display sizes (which can be texture-pixel dimensions and shift faces).
+ * PIXI display sizes. Foundry V13+ x/y is the mesh origin (see anchor).
  * @param {object} tile
- * @returns {{ id: string|null, x: number, y: number, width: number, height: number, sort: number, flags: object }}
+ * @returns {{
+ *   id: string|null,
+ *   x: number,
+ *   y: number,
+ *   width: number,
+ *   height: number,
+ *   sort: number,
+ *   anchorX: number,
+ *   anchorY: number,
+ *   left: number,
+ *   top: number,
+ *   right: number,
+ *   bottom: number,
+ *   flags: object
+ * }}
  */
 export function navTileGeometry(tile) {
   const doc = tile?.document ?? tile;
@@ -197,21 +221,62 @@ export function navTileGeometry(tile) {
   const width = Number(src.width);
   const height = Number(src.height);
   const sort = Number(src.sort);
+  const tex = src.texture ?? doc?.texture ?? {};
+  const anchorX = Number(tex.anchorX);
+  const anchorY = Number(tex.anchorY);
+  const ax = Number.isFinite(anchorX) ? anchorX : NAV_TILE_ANCHOR;
+  const ay = Number.isFinite(anchorY) ? anchorY : NAV_TILE_ANCHOR;
+  const cx = Number.isFinite(x) ? x : 0;
+  const cy = Number.isFinite(y) ? y : 0;
+  const w = Number.isFinite(width) && width > 0 ? width : 1;
+  const h = Number.isFinite(height) && height > 0 ? height : 1;
+  const left = cx - w * ax;
+  const top = cy - h * ay;
   return {
     id: doc?.id ?? doc?._id ?? src?._id ?? null,
-    x: Number.isFinite(x) ? x : 0,
-    y: Number.isFinite(y) ? y : 0,
-    width: Number.isFinite(width) && width > 0 ? width : 1,
-    height: Number.isFinite(height) && height > 0 ? height : 1,
+    x: cx,
+    y: cy,
+    width: w,
+    height: h,
     sort: Number.isFinite(sort) ? sort : 0,
+    anchorX: ax,
+    anchorY: ay,
+    left,
+    top,
+    right: left + w,
+    bottom: top + h,
     flags: doc?.flags ?? src?.flags ?? {}
   };
 }
 
 /**
- * Layout small token-art faces along the bottom edge of a left nav thumbnail:
- * horizontally centered, fully inside the thumb (bottom edge of face on/above
- * the nav tile bottom border). No texture scale — box size is the visual size.
+ * Axis-aligned scene bounds for a tile, honouring texture.anchor (V13 centre origin).
+ * @param {object} tile
+ * @returns {{ x: number, y: number, x2: number, y2: number, width: number, height: number }}
+ */
+export function navTileAxisBounds(tile) {
+  const geom = navTileGeometry(tile);
+  return {
+    x: geom.left,
+    y: geom.top,
+    x2: geom.right,
+    y2: geom.bottom,
+    width: geom.width,
+    height: geom.height
+  };
+}
+
+/**
+ * Layout NPC token-art faces on a left nav thumbnail.
+ *
+ * Rules (from hand-tuned Expo scene `01. 📍 Korbane Village Approach`):
+ * - Face tile is 72×72 with texture scale 1.2, fit=fill, anchor 0.5/0.5
+ * - Foundry V13 x/y is the tile centre (anchor 0.5)
+ * - Single face: same centre-x as parent; centre-y so the face box sits on the
+ *   thumb bottom → `y = parent.y + (parent.height - faceSize) / 2`
+ * - Multiple faces: same y; centres spaced {@link NAV_FACE_CENTER_SPACING} apart,
+ *   row centred on parent.x
+ *
  * @param {object} parentTile
  * @param {Array<{ img: string, name?: string }>} faces
  * @returns {object[]} Tile create payloads
@@ -224,27 +289,21 @@ export function buildNavFaceTiles(parentTile, faces = []) {
   }
   const geom = navTileGeometry(parentTile);
   const parentId = geom.id;
-  const pw = geom.width;
-  const ph = geom.height;
-  // Cap face size so a row of NAV_FACE_MAX still fits inside the thumb.
-  const size = Math.max(
-    28,
-    Math.min(72, Math.floor(pw * NAV_FACE_SIZE_RATIO), Math.floor((pw - 8) / max))
-  );
-  const gap = 4;
-  const total = max * size + (max - 1) * gap;
-  const startX = geom.x + (pw - total) / 2;
-  // Bottom of face tile == bottom of nav tile, then nudge up by inset.
-  const y = geom.y + ph - size - NAV_FACE_BOTTOM_INSET;
-  const sort = geom.sort + 10;
+  const size = NAV_FACE_SIZE;
+  // Bottom-align face centres with parent: parent.y + ph/2 - size/2
+  // (with centre-origin coords this is parent.y + (ph - size) / 2).
+  const faceY = geom.y + (geom.height - size) / 2;
+  const spacing = NAV_FACE_CENTER_SPACING;
+  const firstCenterX = geom.x - ((max - 1) * spacing) / 2;
+  const sort = geom.sort + 1;
   /** @type {object[]} */
   const created = [];
   for (let i = 0; i < max; i += 1) {
     const face = list[i];
     created.push({
       name: String(face.name || "NPC").trim() || "NPC",
-      x: Math.round(startX + i * (size + gap)),
-      y: Math.round(y),
+      x: Math.round(firstCenterX + i * spacing),
+      y: Math.round(faceY),
       width: size,
       height: size,
       rotation: 0,
@@ -254,9 +313,11 @@ export function buildNavFaceTiles(parentTile, faces = []) {
       sort,
       texture: {
         src: face.img,
-        scaleX: 1,
-        scaleY: 1,
-        fit: "contain"
+        scaleX: NAV_FACE_TEXTURE_SCALE,
+        scaleY: NAV_FACE_TEXTURE_SCALE,
+        anchorX: NAV_TILE_ANCHOR,
+        anchorY: NAV_TILE_ANCHOR,
+        fit: "fill"
       },
       flags: {
         [FLAG_SCOPE]: {

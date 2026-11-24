@@ -744,75 +744,87 @@ for (const path of paths) {
   );
   assert(faces.length === 3, "three face tiles under thumb");
   assert(faces[0].flags.dlfi.kind === "matt-nav-face", "face tile flagged");
-  const faceSize = faces[0].width;
-  assert(faces[0].texture.scaleX === 1, "face texture unscaled (box is the visual size)");
-  // Bottom of face = parent bottom - inset
-  const expectedFaceY = Math.round(200 + 252 - faceSize - 4);
-  assert(faces[0].y === expectedFaceY, `faces sit above thumb bottom (got ${faces[0].y}, want ${expectedFaceY})`);
-  assert(faces[0].y + faces[0].height <= 200 + 252, "face fully inside thumb vertically");
+  assert(faces[0].width === 72 && faces[0].texture.scaleX === 1.2, "face 72px @ 1.2× scale");
+  assert(faces[0].texture.anchorX === 0.5 && faces[0].texture.fit === "fill", "face centre-anchored fill");
+  // Parent plain object without anchor → defaults to 0.5 centre origin.
+  // face.y = parent.y + (ph - size) / 2 ; face centres spaced 120 apart around parent.x
+  const expectedFaceY = Math.round(200 + (252 - 72) / 2);
+  assert(faces[0].y === expectedFaceY, `faces bottom-aligned via centre origin (got ${faces[0].y}, want ${expectedFaceY})`);
   assert(faces[0].texture.src === "tokens/a.webp", "face uses token art");
-  const rowWidth = 3 * faceSize + 2 * 4;
-  const expectedStartX = Math.round(100 + (448 - rowWidth) / 2);
-  assert(faces[0].x === expectedStartX, `face row centered (got ${faces[0].x}, want ${expectedStartX})`);
-  assert(faces[0].x >= 100, "face left edge inside thumb");
-  assert(faces[2].x + faces[2].width <= 100 + 448, "face right edge inside thumb");
+  assert(faces[1].x - faces[0].x === 120, "face centres spaced 120px");
+  assert(faces[1].x === 100, "middle face shares parent centre x");
 
-  // Prefer toObject() / _source over PIXI display sizes.
-  const ghostDoc = {
-    id: "ghost",
-    _source: { x: 500, y: 600, width: 448, height: 252, sort: 2 },
-    // Misleading PIXI-like getters (texture pixels) — must be ignored.
-    get x() {
-      return 0;
-    },
-    get y() {
-      return 0;
-    },
-    get width() {
-      return 1920;
-    },
-    get height() {
-      return 1080;
-    },
-    flags: { dlfi: { targetSceneId: "Scene.x" } },
+  // Hand-tuned Korbane fixture: parent centre-origin + single face.
+  const korbaneParent = {
+    id: "gOdN7lFloSawyqkG",
     toObject() {
-      return { ...this._source, flags: this.flags };
-    }
+      return {
+        x: 720,
+        y: 300,
+        width: 448,
+        height: 252,
+        sort: 0,
+        texture: { anchorX: 0.5, anchorY: 0.5 },
+        flags: { dlfi: { kind: "matt-nav-left", targetSceneId: "Scene.x" } }
+      };
+    },
+    flags: { dlfi: { kind: "matt-nav-left", targetSceneId: "Scene.x" } }
   };
-  const { navTileGeometry } = await import("./mattSceneNav.mjs");
-  const geom = navTileGeometry(ghostDoc);
-  assert(geom.x === 500 && geom.width === 448, "navTileGeometry prefers toObject over display getters");
-  const fromGeom = buildNavFaceTiles(ghostDoc, [{ img: "t.webp", name: "A" }]);
-  assert(
-    fromGeom[0].x === Math.round(500 + (448 - fromGeom[0].width) / 2),
-    "single face centered on Document tile (toObject geometry)"
-  );
-  assert(fromGeom[0].y + fromGeom[0].height <= 600 + 252, "face stays above bottom from toObject geom");
+  const { navTileGeometry, navTileAxisBounds } = await import("./mattSceneNav.mjs");
+  const geom = navTileGeometry(korbaneParent);
+  assert(geom.left === 720 - 224 && geom.top === 300 - 126, "centre-origin bounds from anchor 0.5");
+  assert(geom.right === 720 + 224 && geom.bottom === 300 + 126, "centre-origin right/bottom");
+  const one = buildNavFaceTiles(korbaneParent, [{ img: "tokens/cream.webp", name: "Stubborn Cream" }]);
+  assert(one[0].x === 720, "single face shares parent centre x");
+  assert(one[0].y === Math.round(300 + (252 - 72) / 2), "single face y matches hand-tuned +90");
+  const two = buildNavFaceTiles(korbaneParent, [
+    { img: "a.webp", name: "A" },
+    { img: "b.webp", name: "B" }
+  ]);
+  assert(two[0].x === 720 - 60 && two[1].x === 720 + 60, "pair centres at ±60 from parent");
   assert(tokenActorId({ actorId: "abc" }) === "abc", "tokenActorId reads actorId");
 
   const {
     findMattNavTileAt,
     mattNavTileBounds
   } = await import("../canvas/mattNavTooltip.mjs");
+  // Centre-origin tile at (720,300) 448×252 → visual box [496,174]–[944,426]
   const tipTile = {
     document: {
-      name: "02. 📍 Dock",
+      name: "01. 📍 Korbane Village Approach",
       sort: 1,
       flags: { dlfi: { kind: "matt-nav-left" } },
-      _source: { x: 100, y: 200, width: 448, height: 252 }
+      toObject() {
+        return {
+          x: 720,
+          y: 300,
+          width: 448,
+          height: 252,
+          texture: { anchorX: 0.5, anchorY: 0.5 },
+          flags: this.flags
+        };
+      }
     },
-    bounds: { x: 100, y: 200, width: 448, height: 252 }
+    // Inflated/wrong placeable bounds must be ignored.
+    bounds: { x: 720, y: 300, width: 896, height: 504 }
   };
-  assert(mattNavTileBounds(tipTile)?.x === 100, "tooltip bounds from placeable");
+  const box = mattNavTileBounds(tipTile);
+  assert(box?.x === 496 && box?.y === 174 && box?.x2 === 944 && box?.y2 === 426, "hover uses anchor-aware bounds");
   assert(
-    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 120, 220)?.document?.name ===
-      "02. 📍 Dock",
-    "hit-test finds nav tile under cursor"
+    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 720, 300)?.document?.name ===
+      "01. 📍 Korbane Village Approach",
+    "hit-test finds nav tile at centre"
   );
   assert(
-    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 10, 10) == null,
-    "hit-test misses empty space"
+    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 1000, 500) == null,
+    "hit-test misses area to the right/below (old top-left bug zone)"
   );
+  assert(
+    findMattNavTileAt({ tiles: { placeables: [tipTile] } }, 500, 180)?.document?.name ===
+      "01. 📍 Korbane Village Approach",
+    "hit-test still hits visible top-left of thumb"
+  );
+  assert(navTileAxisBounds(korbaneParent).x === 496, "navTileAxisBounds left edge");
 
   const { mattNavTooltipText } = await import("../canvas/mattNavTooltip.mjs");
   assert(
