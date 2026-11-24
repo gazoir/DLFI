@@ -53,6 +53,40 @@ export function formatSceneDmName(kind, entry, order) {
   return `${padded}. ${emoji} ${name}`;
 }
 
+/**
+ * Session code for special page names (displayCode preferred).
+ * @param {{ displayCode?: string, sessionCode?: string }} manifest
+ * @returns {string}
+ */
+export function sessionCodeForSceneNames(manifest) {
+  return (
+    String(manifest?.displayCode || manifest?.sessionCode || "SESSION").trim() || "SESSION"
+  );
+}
+
+/**
+ * Landing / Outro / Leftovers DM names.
+ * - Landing: `00. {Code} Landing Page`
+ * - Outro: `{lastMsdOrder+1}. {Code} Outro Page`
+ * - Leftovers: `{outroOrder+1}. {Code} Leftovers`
+ *
+ * @param {"landing"|"outro"|"leftovers"} kind
+ * @param {{ displayCode?: string, sessionCode?: string }} manifest
+ * @param {number} [lastMsdOrder] last location/battlemap order (1-based); 0 if none
+ */
+export function formatSpecialSceneName(kind, manifest, lastMsdOrder = 0) {
+  const code = sessionCodeForSceneNames(manifest);
+  const last = Math.max(0, Math.floor(Number(lastMsdOrder) || 0));
+  if (kind === "landing") {
+    return `00. ${code} Landing Page`;
+  }
+  if (kind === "outro") {
+    return `${padSceneOrder(last + 1)}. ${code} Outro Page`;
+  }
+  // leftovers
+  return `${padSceneOrder(last + 2)}. ${code} Leftovers`;
+}
+
 function hasUsableMsdOrder(entry) {
   const n = Number(entry?.msdOrder);
   return Number.isFinite(n) && n >= 1;

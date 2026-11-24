@@ -701,12 +701,28 @@ for (const path of paths) {
     "left"
   );
   assert(update["texture.src"] === "world/dock.webp", "nav tile texture set");
+  assert(update.name === "01. 📍 Dock", "nav tile named for hover/HUD");
+  assert(update.flags["monks-active-tiles"].pointer === true, "nav tile pointer cursor");
   assert(update.flags["monks-active-tiles"].actions[0].action === "scene", "scene action");
   assert(
     update.flags["monks-active-tiles"].actions[0].data.sceneid.id === "Scene.abc",
     "scene id uuid-style"
   );
   assert(update.flags.dlfi?.kind === "matt-nav-left", "dlfi nav kind");
+
+  const { buildNavFaceTiles } = await import("./mattSceneNav.mjs");
+  const faces = buildNavFaceTiles(
+    { id: "L1", x: 100, y: 200, width: 448, height: 252 },
+    [
+      { img: "tokens/a.webp", name: "A" },
+      { img: "tokens/b.webp", name: "B" },
+      { img: "tokens/c.webp", name: "C" }
+    ]
+  );
+  assert(faces.length === 3, "three face tiles under thumb");
+  assert(faces[0].flags.dlfi.kind === "matt-nav-face", "face tile flagged");
+  assert(faces[0].y === 200 + 252 + 6, "faces sit below thumb");
+  assert(faces[0].texture.src === "tokens/a.webp", "face uses token art");
 }
 
 // Location POIs → emoji list (strip wikilinks, blank lines between)
@@ -1036,6 +1052,22 @@ for (const path of paths) {
     formatSceneDmName("location", { name: "Dock" }, 1) === "01. 📍 Dock",
     "location DM name"
   );
+  {
+    const { formatSpecialSceneName } = await import("./sceneOrder.mjs");
+    const manifest = { displayCode: "DL304", sessionCode: "SESSION_012" };
+    assert(
+      formatSpecialSceneName("landing", manifest, 12) === "00. DL304 Landing Page",
+      "landing scene name"
+    );
+    assert(
+      formatSpecialSceneName("outro", manifest, 12) === "13. DL304 Outro Page",
+      "outro scene name"
+    );
+    assert(
+      formatSpecialSceneName("leftovers", manifest, 12) === "14. DL304 Leftovers",
+      "leftovers scene name"
+    );
+  }
   assert(
     formatSceneDmName("battlemap", { name: "Ambush" }, 2) === "02. ⚔️ Ambush",
     "battlemap DM name"
