@@ -885,7 +885,9 @@ export async function importSessionPackage(loaded, options = {}) {
       items: itemPilesActive ? meta.items : [],
       skipItemPiles: !itemPilesActive,
       itemPilesFolderId: itemPilesFolder?.id ?? null,
-      sessionFolderName: folderName
+      sessionFolderName: folderName,
+      importKey,
+      sessionCode: manifest.sessionCode
     });
   }
 
@@ -1052,7 +1054,9 @@ export async function importSessionPackage(loaded, options = {}) {
         faces
       });
     }
-    const landingImg = landingArt.background || sceneArtSrc(landingScene);
+    // Nav thumb: Logo_Burn (logo + title on the session art), not the Clean BG.
+    const landingImg =
+      landingArt.logoBurn || landingArt.background || sceneArtSrc(landingScene);
     /** @type {Array<{ scene: object, kind: string, dlceId?: string|null, img?: string|null, name?: string }>} */
     const navScenes = [];
     /** @type {Array<{ sceneId: string, name: string, img?: string|null, kind: string, faces?: object[] }>} */

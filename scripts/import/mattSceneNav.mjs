@@ -22,8 +22,12 @@ export const LEFT_NAV_ROLL_FROM = 10;
 export const NAV_FACE_MAX = 5;
 /** Face size as a fraction of the parent thumb width. */
 export const NAV_FACE_SIZE_RATIO = 0.18;
-/** Inset from the thumb bottom edge so faces sit on the artwork, not below it. */
-export const NAV_FACE_BOTTOM_INSET = 10;
+/**
+ * Texture scale on face tiles. Token art frames read larger than the tile box;
+ * overflow is centered, so we shift the box up so the visible circle sits on the
+ * nav thumb's bottom edge.
+ */
+export const NAV_FACE_TEXTURE_SCALE = 1.2;
 
 /**
  * @returns {boolean}
@@ -169,8 +173,32 @@ export function sceneArtSrc(scene) {
 }
 
 /**
- * Layout small token-art faces along the bottom edge of a left nav thumbnail
- * (inside the art, centered — matches the Expo strip look).
+ * Read tile geometry without object-spread (Foundry Documents do not enumerate x/y/w/h).
+ * @param {object} tile
+ * @returns {{ id: string|null, x: number, y: number, width: number, height: number, sort: number, flags: object }}
+ */
+export function navTileGeometry(tile) {
+  const src = tile?._source ?? tile;
+  const x = Number(tile?.x ?? src?.x);
+  const y = Number(tile?.y ?? src?.y);
+  const width = Number(tile?.width ?? src?.width);
+  const height = Number(tile?.height ?? src?.height);
+  const sort = Number(tile?.sort ?? src?.sort);
+  return {
+    id: tile?.id ?? tile?._id ?? src?._id ?? null,
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? y : 0,
+    width: Number.isFinite(width) && width > 0 ? width : 1,
+    height: Number.isFinite(height) && height > 0 ? height : 1,
+    sort: Number.isFinite(sort) ? sort : 0,
+    flags: tile?.flags ?? src?.flags ?? {}
+  };
+}
+
+/**
+ * Layout small token-art faces along the bottom edge of a left nav thumbnail:
+ * horizontally centered; visible circle (at {@link NAV_FACE_TEXTURE_SCALE}) sits
+ * on the thumb's bottom edge.
  * @param {object} parentTile
  * @param {Array<{ img: string, name?: string }>} faces
  * @returns {object[]} Tile create payloads
@@ -181,18 +209,20 @@ export function buildNavFaceTiles(parentTile, faces = []) {
   if (!max || !parentTile) {
     return [];
   }
-  const parentId = parentTile.id ?? parentTile._id ?? null;
-  const pw = Math.max(1, Number(parentTile.width) || 1);
-  const ph = Math.max(1, Number(parentTile.height) || 1);
+  const geom = navTileGeometry(parentTile);
+  const parentId = geom.id;
+  const pw = geom.width;
+  const ph = geom.height;
   const size = Math.max(28, Math.min(72, Math.floor(pw * NAV_FACE_SIZE_RATIO)));
   const gap = 6;
   const total = max * size + (max - 1) * gap;
-  const startX = Number(parentTile.x) + Math.max(0, (pw - total) / 2);
-  // Sit on the bottom of the thumb artwork (not in the gap below the tile).
-  const y =
-    Number(parentTile.y) + ph - size - NAV_FACE_BOTTOM_INSET;
-  const parentSort = Number(parentTile.sort);
-  const sort = Number.isFinite(parentSort) ? parentSort + 1 : 100;
+  // Center the face row in the thumb.
+  const startX = geom.x + Math.max(0, (pw - total) / 2);
+  // Texture scale >1 overflows equally; raise the box so the visible bottom
+  // edge lands on the nav tile bottom (overflow = size * (scale - 1) / 2).
+  const overflow = (size * (NAV_FACE_TEXTURE_SCALE - 1)) / 2;
+  const y = geom.y + ph - size - overflow;
+  const sort = geom.sort + 1;
   /** @type {object[]} */
   const created = [];
   for (let i = 0; i < max; i += 1) {
@@ -208,12 +238,16 @@ export function buildNavFaceTiles(parentTile, faces = []) {
       hidden: false,
       locked: false,
       sort,
-      texture: { src: face.img },
+      texture: {
+        src: face.img,
+        scaleX: NAV_FACE_TEXTURE_SCALE,
+        scaleY: NAV_FACE_TEXTURE_SCALE
+      },
       flags: {
         [FLAG_SCOPE]: {
           kind: "matt-nav-face",
           parentTileId: parentId,
-          targetSceneId: parentTile.flags?.[FLAG_SCOPE]?.targetSceneId ?? null
+          targetSceneId: geom.flags?.[FLAG_SCOPE]?.targetSceneId ?? null
         }
       }
     });
@@ -276,10 +310,15 @@ export async function populateMattSceneNav(scene, targets = {}) {
       const patch = mattTileUpdate(tile, row, side);
       updates.push(patch);
       if (side === "left") {
-        // Faces use post-update targetSceneId via flags on the patch.
+        // Explicit geometry — never object-spread Foundry Documents (x/y/w/h vanish).
+        const geom = navTileGeometry(tile);
         const parentForFaces = {
-          ...tile,
           id,
+          x: geom.x,
+          y: geom.y,
+          width: geom.width,
+          height: geom.height,
+          sort: geom.sort,
           flags: patch.flags
         };
         faceCreates.push(...buildNavFaceTiles(parentForFaces, row.faces ?? []));
