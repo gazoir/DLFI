@@ -482,6 +482,49 @@ for (const path of paths) {
   );
 }
 
+{
+  const { applySceneBackground, refreshSceneThumbnail } = await import(
+    "./applySceneBackground.mjs"
+  );
+  /** @type {object[]} */
+  const calls = [];
+  const scene = {
+    name: "01. 📍 Test",
+    thumb: null,
+    background: { src: null },
+    levels: { contents: [] },
+    async update(patch) {
+      calls.push(["update", patch]);
+      if (patch.background) {
+        this.background = { ...this.background, ...patch.background };
+      }
+      if (patch.thumb) {
+        this.thumb = patch.thumb;
+      }
+    },
+    async createThumbnail(opts = {}) {
+      calls.push(["createThumbnail", opts]);
+      return { thumb: "data:image/webp;base64,THUMB" };
+    }
+  };
+  assert(
+    (await applySceneBackground(scene, "world/maps/dock.webp")) === true,
+    "applySceneBackground returns true"
+  );
+  assert(
+    calls.some((c) => c[0] === "update" && c[1]?.background?.src === "world/maps/dock.webp"),
+    "background src written"
+  );
+  assert(
+    calls.some((c) => c[0] === "createThumbnail"),
+    "createThumbnail called after background set"
+  );
+  assert(scene.thumb === "data:image/webp;base64,THUMB", "scene.thumb stored for Scene Directory");
+
+  const again = await refreshSceneThumbnail(scene, { img: "world/maps/dock.webp" });
+  assert(again === "data:image/webp;base64,THUMB", "refreshSceneThumbnail returns thumb");
+}
+
 // Location artwork resolves under assets/location/ (DLCE v2 layout)
 {
   const uploaded = new Map([
