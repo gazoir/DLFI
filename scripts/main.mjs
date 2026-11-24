@@ -22,6 +22,7 @@ import {
   setting
 } from "./constants.mjs";
 import { registerHideLandingEffectsHooks } from "./canvas/hideLandingEffects.mjs";
+import { registerMattNavTooltipHooks } from "./canvas/mattNavTooltip.mjs";
 import { ensureDataFolder } from "./package/dataFolders.mjs";
 import { ensureInboxRoot } from "./package/inbox.mjs";
 import { liveSessionPcActors } from "./import/sessions.mjs";
@@ -152,6 +153,7 @@ Hooks.once("ready", () => {
     `${MODULE_ID} | ready (packageFormatVersion ${PACKAGE_FORMAT_VERSION}). Open Damned Lucky from scene controls or Configure Settings.`
   );
   registerHideLandingEffectsHooks();
+  registerMattNavTooltipHooks();
   // Create storage roots so Refresh / Import do not fail on a missing folder.
   void (async () => {
     try {

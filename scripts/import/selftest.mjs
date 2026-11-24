@@ -609,23 +609,25 @@ for (const path of paths) {
     rightNavWindow
   } = await import("./mattSceneNav.mjs");
 
-  assert(LEFT_NAV_SLOTS === 14 && RIGHT_NAV_SLOTS === 4, "nav slot counts");
-  const many = Array.from({ length: 16 }, (_, i) => ({ id: `s${i}`, name: `Scene ${i + 1}` }));
+  assert(LEFT_NAV_SLOTS === 22 && RIGHT_NAV_SLOTS === 6, "nav slot counts");
+  const many = Array.from({ length: 28 }, (_, i) => ({ id: `s${i}`, name: `Scene ${i + 1}` }));
   const w0 = leftNavWindow(many, 0);
-  assert(w0.length === 14 && w0[0].id === "s0" && w0[13].id === "s13", "scenes 1–6 keep Landing…14");
-  const w6 = leftNavWindow(many, 6);
-  assert(w6[0].id === "s1" && w6[13].id === "s14", "scene 7 drops Landing, gains scene 15");
-  const w7 = leftNavWindow(many, 7);
-  assert(w7[0].id === "s2" && w7[13].id === "s15", "scene 8 drops Landing+1, gains 15–16");
+  assert(w0.length === 22 && w0[0].id === "s0" && w0[21].id === "s21", "scenes 1–9 keep Landing…22");
+  const w9 = leftNavWindow(many, 9);
+  assert(w9[0].id === "s1" && w9[21].id === "s22", "scene 10 drops Landing, gains scene 23");
+  const w10 = leftNavWindow(many, 10);
+  assert(w10[0].id === "s2" && w10[21].id === "s23", "scene 11 drops Landing+1, gains 23–24");
   const few = many.slice(0, 5);
-  assert(leftNavWindow(few, 0).length === 5, "fewer than 14 keeps all");
+  assert(leftNavWindow(few, 0).length === 5, "fewer than 22 keeps all");
 
   const maps = [
     { sceneId: "b1", hostLocationId: "loc_a" },
     { sceneId: "b2", hostLocationId: "loc_a" },
     { sceneId: "b3", hostLocationId: "loc_b" },
     { sceneId: "b4", hostLocationId: "loc_b" },
-    { sceneId: "b5", hostLocationId: "loc_b" }
+    { sceneId: "b5", hostLocationId: "loc_b" },
+    { sceneId: "b6", hostLocationId: "loc_c" },
+    { sceneId: "b7", hostLocationId: "loc_c" }
   ];
   assert(
     rightNavWindow(maps, { kind: "location", dlceId: "loc_a" }).map((r) => r.sceneId).join(",") ===
@@ -633,8 +635,9 @@ for (const path of paths) {
     "location right nav prefers linked battlemaps"
   );
   assert(
-    rightNavWindow(maps, { kind: "landing" }).map((r) => r.sceneId).join(",") === "b1,b2,b3,b4",
-    "landing right nav takes first 4"
+    rightNavWindow(maps, { kind: "landing" }).map((r) => r.sceneId).join(",") ===
+      "b1,b2,b3,b4,b5,b6",
+    "landing right nav takes first 6"
   );
 
   const metrics = { sceneX: 960, sceneWidth: 1920, sceneY: 540, sceneHeight: 1080 };
@@ -648,10 +651,23 @@ for (const path of paths) {
   assert(
     classifyMattNavSide(
       {
-        x: 3120,
-        y: 1020,
+        x: 1680,
+        y: 1860,
+        width: 448,
+        height: 252,
+        flags: { "monks-active-tiles": { active: true } }
+      },
+      metrics
+    ) === "left",
+    "bottom-row landscape under map still left nav"
+  );
+  assert(
+    classifyMattNavSide(
+      {
+        x: 3300,
+        y: 840,
         width: 320,
-        height: 540,
+        height: 440,
         flags: { "monks-active-tiles": { active: true } }
       },
       metrics
@@ -721,8 +737,25 @@ for (const path of paths) {
   );
   assert(faces.length === 3, "three face tiles under thumb");
   assert(faces[0].flags.dlfi.kind === "matt-nav-face", "face tile flagged");
-  assert(faces[0].y === 200 + 252 + 6, "faces sit below thumb");
+  // Inside thumb: y = parent.y + height - size - inset
+  const expectedFaceY = 200 + 252 - faces[0].height - 10;
+  assert(faces[0].y === expectedFaceY, `faces sit on thumb bottom (got ${faces[0].y}, want ${expectedFaceY})`);
   assert(faces[0].texture.src === "tokens/a.webp", "face uses token art");
+  const mid = faces[0].x + faces[0].width / 2;
+  assert(mid > 100 && mid < 100 + 448, "face centered within thumb width");
+
+  const { mattNavTooltipText } = await import("../canvas/mattNavTooltip.mjs");
+  assert(
+    mattNavTooltipText({
+      name: "01. 📍 Dock",
+      flags: { dlfi: { kind: "matt-nav-left" } }
+    }) === "01. 📍 Dock",
+    "tooltip text from nav tile"
+  );
+  assert(
+    mattNavTooltipText({ name: "Nope", flags: { dlfi: { kind: "matt-nav-face" } } }) === "",
+    "face tiles have no tooltip"
+  );
 }
 
 // Location POIs → emoji list (strip wikilinks, blank lines between)
