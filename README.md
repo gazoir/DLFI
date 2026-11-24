@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.51`)
+## Status (`0.1.52`)
 
+- **0.1.52:** Loot / cash items set dnd5e \`system.price\` from DLCE \`fields.gp_value\` (e.g. White metal Epergne → 393 gp)
 - **0.1.51:** Hardened Scene Directory thumbnails — ImageHelper fallback + end-of-import refresh (fixes empty sidebar / Session Scenes modal)
 - **0.1.50:** Import tab shows human export stamps (`24 November 2026 - 2 hours ago`) instead of raw UTC ISO
 - **0.1.49:** Outro/Landing centre art (**Title Only** / **Logo Only** / Thanks for Playing) is never treated as a MATT nav tile — only the small left/right placeholders get scene thumbs

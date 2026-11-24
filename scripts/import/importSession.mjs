@@ -17,6 +17,7 @@ import {
   SETTING_TEMPLATE_OUTRO
 } from "../constants.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
+import { buildItemCreateData } from "./buildItemData.mjs";
 import {
   alertEmptyPcs,
   alertPcStubResults,
@@ -27,7 +28,6 @@ import {
   applySceneBackground,
   refreshSceneThumbnails
 } from "./applySceneBackground.mjs";
-import { markdownToHtml } from "./markdown.mjs";
 import {
   buildChallengeHostLocations,
   buildItemLocationsFromLocationLinks,
@@ -796,28 +796,15 @@ export async function importSessionPackage(loaded, options = {}) {
     const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
     const fields = raw?.fields ?? {};
     const subtype = entry.subtype ?? fields.subtype ?? "plot";
-    const item = await Item.create({
-      name: entry.name,
-      type: mapItemType(subtype, fields),
-      img: portrait || undefined,
-      folder: folders.Item?.id ?? null,
-      system: {
-        description: {
-          value: markdownToHtml(
-            fields.description || fields.appearance || fields.effect || fields.text || ""
-          )
-        },
-        rarity: String(fields.rarity || "").toLowerCase() || undefined
-      },
-      flags: {
-        [FLAG_SCOPE]: {
-          dlceId: entry.id,
-          subtype,
-          locationIds: entry.locationIds ?? [],
-          importKey
-        }
-      }
-    });
+    const item = await Item.create(
+      buildItemCreateData({
+        entry: { ...entry, subtype },
+        fields,
+        portraitWorldPath: portrait || null,
+        folderId: folders.Item?.id ?? null,
+        importKey
+      })
+    );
     createdByDlceId.set(entry.id, item.uuid);
     const locationIds = collectItemLocationIds(
       entry,
@@ -1251,16 +1238,6 @@ function matchExistingPcActor(pc) {
     return null;
   }
   return actors.find((actor) => String(actor.name || "").trim().toLowerCase() === name) ?? null;
-}
-
-function mapItemType(subtype, fields) {
-  if (subtype === "magic" || fields.rarity || fields.category) {
-    return "loot";
-  }
-  if (subtype === "cash_loot" || subtype === "gold_pieces") {
-    return "loot";
-  }
-  return "loot";
 }
 
 function escapeHtml(value) {

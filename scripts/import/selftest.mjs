@@ -484,6 +484,41 @@ for (const path of paths) {
 
 {
   const {
+    buildItemCreateData,
+    buildItemPrice,
+    resolveItemGpValue
+  } = await import("./buildItemData.mjs");
+  assert(resolveItemGpValue({ gp_value: "393" }) === 393, "gp_value 393");
+  assert(resolveItemGpValue({ gp_value: "1,200 GP" }) === 1200, "gp_value with GP suffix");
+  assert(resolveItemGpValue({ value: "50" }) === 50, "value alias");
+  assert(resolveItemGpValue({}) == null, "missing gp_value");
+  assert(
+    JSON.stringify(buildItemPrice({ gp_value: "393" })) ===
+      JSON.stringify({ value: 393, denomination: "gp" }),
+    "price object for dnd5e loot"
+  );
+  const epergne = buildItemCreateData({
+    entry: {
+      id: "item_white_metal_epergne",
+      name: "White metal Epergne",
+      subtype: "cash_loot",
+      locationIds: ["loc_trader"]
+    },
+    fields: {
+      description:
+        "A white metal epergne, set with a large spinel and finished with flat inset pieces of lapis lazuli.",
+      gp_value: "393"
+    },
+    importKey: "SESSION_014_test"
+  });
+  assert(epergne.type === "loot", "cash_loot → loot");
+  assert(epergne.system.price?.value === 393, "epergne price.value 393");
+  assert(epergne.system.price?.denomination === "gp", "epergne denomination gp");
+  assert(epergne.flags.dlfi.gpValue === 393, "flag mirrors gp");
+}
+
+{
+  const {
     formatElapsedSince,
     formatExportDate,
     formatExportStamp,
