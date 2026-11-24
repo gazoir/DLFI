@@ -729,6 +729,63 @@ for (const path of paths) {
     "non-MATT tile ignored"
   );
 
+  const {
+    isMattNavSlotTile,
+    isProtectedArtTile,
+    NAV_TILE_MAX_EDGE
+  } = await import("./mattSceneNav.mjs");
+  assert(NAV_TILE_MAX_EDGE === 700, "nav max edge");
+  assert(
+    isProtectedArtTile({ name: "Title Only", width: 1600, height: 900 }) === true,
+    "Title Only is protected art"
+  );
+  assert(
+    isProtectedArtTile({
+      name: "Scene",
+      texture: { src: "DM/Title Cards/Thanks for Playing.webp" }
+    }) === true,
+    "Thanks for Playing src is protected"
+  );
+  assert(
+    classifyMattNavSide(
+      {
+        id: "thanks",
+        name: "Title Only",
+        x: 1920,
+        y: 1180,
+        width: 1600,
+        height: 900,
+        flags: {
+          "monks-active-tiles": { active: false, actions: [] }
+        },
+        texture: { src: "DM/Title Cards/Thanks for Playing.webp" }
+      },
+      metrics
+    ) === null,
+    "Outro Title Only / Thanks for Playing is not a nav tile"
+  );
+  assert(
+    isMattNavSlotTile({
+      name: "Title Only",
+      width: 1600,
+      height: 900,
+      flags: { "monks-active-tiles": { active: true, actions: [] } }
+    }) === false,
+    "large Title Only excluded even if MATT active"
+  );
+  assert(
+    isMattNavSlotTile({
+      name: "Stubborn Cream",
+      width: 72,
+      height: 72,
+      flags: {
+        "monks-active-tiles": { active: false },
+        dlfi: { kind: "matt-nav-face" }
+      }
+    }) === false,
+    "nav face tiles excluded"
+  );
+
   const listed = listMattNavTiles({
     width: 1920,
     height: 1080,
@@ -751,12 +808,23 @@ for (const path of paths) {
           height: 540,
           flags: { "monks-active-tiles": { active: true, actions: [] } }
         },
+        {
+          id: "thanks",
+          name: "Title Only",
+          x: 1920,
+          y: 1180,
+          width: 1600,
+          height: 900,
+          flags: { "monks-active-tiles": { active: false, actions: [] } },
+          texture: { src: "DM/Title Cards/Thanks for Playing.webp" }
+        },
         { id: "logo", x: 1000, y: 100, width: 400, height: 200, flags: {} }
       ]
     }
   });
   assert(listed.left.map((t) => t.id).join(",") === "L1", "lists one left nav tile");
   assert(listed.right.map((t) => t.id).join(",") === "R1", "lists one right nav tile");
+  assert(!listed.left.some((t) => t.id === "thanks"), "Thanks for Playing excluded from left nav");
 
   const update = mattTileUpdate(
     {

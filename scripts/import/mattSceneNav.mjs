@@ -34,6 +34,12 @@ export const NAV_FACE_CENTER_SPACING = 120;
  * tiles use anchor 0.5/0.5, so x/y is the centre of the rectangle — not top-left.
  */
 export const NAV_TILE_ANCHOR = 0.5;
+/**
+ * Nav placeholders are ~448×252 (left) / ~320×440 (right). Outro/Landing centre
+ * art ("Title Only" / "Logo Only", Thanks for Playing) is ~1600×900 and must
+ * never be treated as a nav slot — even when the template left MATT flags on it.
+ */
+export const NAV_TILE_MAX_EDGE = 700;
 
 /**
  * @returns {boolean}
@@ -41,6 +47,56 @@ export const NAV_TILE_ANCHOR = 0.5;
 export function isMonksActiveTilesActive() {
   const modules = globalThis.game?.modules;
   return Boolean(modules?.get?.(MONKS_ACTIVE_TILES_ID)?.active);
+}
+
+/**
+ * Centre-stage Landing/Outro artwork tiles that must keep their texture.
+ * @param {object} tile
+ * @returns {boolean}
+ */
+export function isProtectedArtTile(tile) {
+  const kind = tile?.flags?.[FLAG_SCOPE]?.kind;
+  if (kind === "matt-nav-face") {
+    return true;
+  }
+  const name = String(tile?.name ?? "").trim();
+  if (/^(logo|title)\s*only$/i.test(name)) {
+    return true;
+  }
+  if (/thanks\s*for\s*playing/i.test(name)) {
+    return true;
+  }
+  const src = String(tile?.texture?.src ?? tile?.img ?? "");
+  if (/Logo[_ ]?Only|Title[_ ]?Only|Thanks[%+ ]?for[%+ ]?Playing/i.test(src)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when a tile is a MATT nav placeholder (small left/right strip slots).
+ * Excludes inactive MATT overlays, NPC faces, and Logo/Title Only centre art.
+ * @param {object} tile
+ * @returns {boolean}
+ */
+export function isMattNavSlotTile(tile) {
+  const flags = tile?.flags?.[MONKS_ACTIVE_TILES_ID];
+  if (!flags || typeof flags !== "object") {
+    return false;
+  }
+  // Outro "Title Only" ships with MATT flags but active:false — never a nav slot.
+  if (flags.active === false) {
+    return false;
+  }
+  if (isProtectedArtTile(tile)) {
+    return false;
+  }
+  const w = Math.max(1, Number(tile.width) || 1);
+  const h = Math.max(1, Number(tile.height) || 1);
+  if (Math.max(w, h) > NAV_TILE_MAX_EDGE) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -98,8 +154,7 @@ export function rightNavWindow(battlemaps, current = {}, slots = RIGHT_NAV_SLOTS
  * @returns {boolean}
  */
 export function isMattTriggerTile(tile) {
-  const flags = tile?.flags?.[MONKS_ACTIVE_TILES_ID];
-  return Boolean(flags && typeof flags === "object");
+  return isMattNavSlotTile(tile);
 }
 
 /**
@@ -110,7 +165,7 @@ export function isMattTriggerTile(tile) {
  * @returns {"left"|"right"|null}
  */
 export function classifyMattNavSide(tile, _metrics) {
-  if (!isMattTriggerTile(tile)) {
+  if (!isMattNavSlotTile(tile)) {
     return null;
   }
   const w = Math.max(1, Number(tile.width) || 1);
@@ -344,6 +399,49 @@ export function listMattNavFaceTileIds(scene) {
 }
 
 /**
+ * Disable accidental MATT triggers on Logo/Title Only / Thanks for Playing tiles
+ * without changing their texture or geometry.
+ * @param {Scene} scene
+ * @returns {object[]}
+ */
+export function protectedArtMattStripUpdates(scene) {
+  const tiles = [...(scene?.tiles?.contents ?? scene?.tiles ?? [])];
+  /** @type {object[]} */
+  const updates = [];
+  for (const tile of tiles) {
+    const kind = tile?.flags?.[FLAG_SCOPE]?.kind;
+    if (kind === "matt-nav-face") {
+      continue;
+    }
+    if (!isProtectedArtTile(tile)) {
+      continue;
+    }
+    const matt = tile.flags?.[MONKS_ACTIVE_TILES_ID];
+    if (!matt || typeof matt !== "object") {
+      continue;
+    }
+    const id = tile.id ?? tile._id;
+    if (!id) {
+      continue;
+    }
+    // Keep texture/name; just disarm MATT so centre art never navigates.
+    updates.push({
+      _id: id,
+      flags: {
+        ...(tile.flags ?? {}),
+        [MONKS_ACTIVE_TILES_ID]: {
+          ...matt,
+          active: false,
+          pointer: false,
+          actions: []
+        }
+      }
+    });
+  }
+  return updates;
+}
+
+/**
  * Populate MATT nav tiles on one scene; delete unused placeholders.
  *
  * @param {Scene} scene
@@ -358,14 +456,15 @@ export async function populateMattSceneNav(scene, targets = {}) {
     return { updated: 0, deleted: 0, faces: 0 };
   }
   const { left, right } = listMattNavTiles(scene);
-  if (!left.length && !right.length) {
+  const protectUpdates = protectedArtMattStripUpdates(scene);
+  if (!left.length && !right.length && !protectUpdates.length) {
     return { updated: 0, deleted: 0, faces: 0 };
   }
 
   const leftTargets = targets.leftTargets ?? [];
   const rightTargets = targets.rightTargets ?? [];
   /** @type {object[]} */
-  const updates = [];
+  const updates = [...protectUpdates];
   /** @type {string[]} */
   const deleteIds = [...listMattNavFaceTileIds(scene)];
   /** @type {Array<{ tileId: string, faces: object[] }>} */
