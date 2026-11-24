@@ -228,13 +228,23 @@ export function sceneArtSrc(scene) {
   if (top) {
     return String(top);
   }
+  // Foundry EmbeddedCollection is not an Array — prefer .contents.
   const levels = scene.levels ?? scene._source?.levels;
-  if (Array.isArray(levels)) {
-    for (const level of levels) {
-      const src = level?.background?.src;
-      if (src) {
-        return String(src);
-      }
+  const list =
+    levels?.contents ?? (Array.isArray(levels) ? levels : levels ? [...levels] : []);
+  const initialId = scene.initialLevel ?? scene._source?.initialLevel ?? null;
+  if (initialId) {
+    const match =
+      levels?.get?.(initialId) ||
+      list.find((level) => (level?.id ?? level?._id) === initialId);
+    if (match?.background?.src) {
+      return String(match.background.src);
+    }
+  }
+  for (const level of list) {
+    const src = level?.background?.src;
+    if (src) {
+      return String(src);
     }
   }
   return null;

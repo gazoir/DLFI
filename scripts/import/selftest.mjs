@@ -538,9 +538,13 @@ for (const path of paths) {
 }
 
 {
-  const { applySceneBackground, refreshSceneThumbnail } = await import(
-    "./applySceneBackground.mjs"
-  );
+  const {
+    applySceneBackground,
+    refreshSceneThumbnail,
+    refreshSceneThumbnails,
+    resolveSceneBackgroundSrc,
+    createThumbnailFromSrc
+  } = await import("./applySceneBackground.mjs");
   /** @type {object[]} */
   const calls = [];
   const scene = {
@@ -578,6 +582,71 @@ for (const path of paths) {
 
   const again = await refreshSceneThumbnail(scene, { img: "world/maps/dock.webp" });
   assert(again === "data:image/webp;base64,THUMB", "refreshSceneThumbnail returns thumb");
+
+  assert(
+    resolveSceneBackgroundSrc({
+      background: { src: null },
+      levels: {
+        contents: [{ id: "L1", background: { src: "maps/level.webp" } }],
+        get(id) {
+          return this.contents.find((l) => l.id === id);
+        }
+      },
+      initialLevel: "L1"
+    }) === "maps/level.webp",
+    "resolveSceneBackgroundSrc reads Level collection"
+  );
+
+  // ImageHelper fallback when Scene#createThumbnail throws
+  globalThis.foundry = globalThis.foundry || { utils: globalThis.foundry?.utils };
+  globalThis.foundry.helpers = {
+    media: {
+      ImageHelper: {
+        async createThumbnail(src) {
+          return { thumb: `data:image/webp;base64,IH:${src}` };
+        }
+      }
+    }
+  };
+  const broken = {
+    name: "Broken",
+    thumb: null,
+    background: { src: "maps/x.webp" },
+    levels: { contents: [] },
+    async createThumbnail() {
+      throw new Error("nope");
+    },
+    async update(patch) {
+      if (patch.thumb) this.thumb = patch.thumb;
+    }
+  };
+  const viaHelper = await refreshSceneThumbnail(broken, { img: "maps/x.webp" });
+  assert(viaHelper === "data:image/webp;base64,IH:maps/x.webp", "ImageHelper fallback thumb");
+  assert(broken.thumb === viaHelper, "fallback thumb persisted");
+  assert(
+    (await createThumbnailFromSrc("maps/y.webp")) === "data:image/webp;base64,IH:maps/y.webp",
+    "createThumbnailFromSrc uses ImageHelper"
+  );
+
+  const batch = await refreshSceneThumbnails([scene, broken]);
+  assert(batch.attempted === 2, "batch refresh attempts both");
+}
+
+{
+  const { sceneArtSrc } = await import("./mattSceneNav.mjs");
+  assert(
+    sceneArtSrc({
+      background: { src: null },
+      levels: {
+        contents: [{ id: "a", background: { src: "loc.webp" } }],
+        get(id) {
+          return this.contents.find((l) => l.id === id);
+        }
+      },
+      initialLevel: "a"
+    }) === "loc.webp",
+    "sceneArtSrc reads EmbeddedCollection levels"
+  );
 }
 
 // Location artwork resolves under assets/location/ (DLCE v2 layout)

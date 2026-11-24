@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.50`)
+## Status (`0.1.51`)
 
+- **0.1.51:** Hardened Scene Directory thumbnails — ImageHelper fallback + end-of-import refresh (fixes empty sidebar / Session Scenes modal)
 - **0.1.50:** Import tab shows human export stamps (`24 November 2026 - 2 hours ago`) instead of raw UTC ISO
 - **0.1.49:** Outro/Landing centre art (**Title Only** / **Logo Only** / Thanks for Playing) is never treated as a MATT nav tile — only the small left/right placeholders get scene thumbs
 - **0.1.48:** Scene Directory thumbnails regenerated (`createThumbnail` + `thumb`) for every imported scene after background apply

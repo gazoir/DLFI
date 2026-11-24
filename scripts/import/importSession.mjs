@@ -23,7 +23,10 @@ import {
   buildExistingPcFillPatch,
   buildPcActorData
 } from "./buildPcActor.mjs";
-import { applySceneBackground } from "./applySceneBackground.mjs";
+import {
+  applySceneBackground,
+  refreshSceneThumbnails
+} from "./applySceneBackground.mjs";
 import { markdownToHtml } from "./markdown.mjs";
 import {
   buildChallengeHostLocations,
@@ -1171,6 +1174,16 @@ export async function importSessionPackage(loaded, options = {}) {
   }
 
   await setSetting(SETTING_LIVE_SESSION, sessionKey(manifest));
+
+  try {
+    progress("scene directory thumbnails", { scenes: sessionSceneIds.length });
+    // Second pass: ensure every imported scene has a Scene Directory thumb.
+    // Mid-import createThumbnail can fail before Level textures are ready;
+    // ImageHelper fallback + a late pass fixes empty sidebar / session-nav tiles.
+    await refreshSceneThumbnails(sessionSceneIds);
+  } catch (error) {
+    console.warn(`${MODULE_ID} | scene thumbnail refresh failed`, error);
+  }
 
   try {
     progress("soft-seat player accounts", { seated: sessionPcs.length });
