@@ -4,9 +4,10 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.44`)
+## Status (`0.1.45`)
 
-- **0.1.44:** MATT nav: 22 left / 6 right slots, roll from Scene 10; hover scene-name tooltip; NPC faces bottom-centered on location thumbs only (not Landing/Outro)
+- **0.1.45:** Session delete clears Item Pile actors (including character-typed / folderless); nav NPC faces use real tile geometry + 1.2× scale on the thumb bottom; Landing nav thumb uses Logo_Burn
+- **0.1.44:** MATT nav: 22 left / 6 right slots, roll from Scene 10; hover scene-name tooltip; NPC faces on location thumbs only (not Landing/Outro)
 - **0.1.43:** Special page names (`00. CODE Landing Page`, Outro/Leftovers after last MSD #); MATT nav tile names + pointer cursor; NPC token-art faces on location thumbs
 - **0.1.42:** Monk's Active Tile Triggers scene nav on Location/Landing/Outro (left: Landing→locations→Outro with rolling window; right: battlemaps); Outro Page Template setting
 - **0.1.41:** Location POI drawings: strip `[[wikilinks]]`, 📍 bullets, blank line between entries

@@ -18,6 +18,11 @@ import { setExclusiveSceneNavigation } from "./folders.mjs";
 import { deleteDataFile, normalizeDataPath } from "../package/dataFolders.mjs";
 import { getFilePicker, isNotFoundError } from "../package/filePicker.mjs";
 import { resolveImportedSessionThumbUrl } from "./resolveLandingArt.mjs";
+import {
+  isDlfiItemPileActor,
+  isLocationItemPilePlaceholderToken,
+  tokenActorId
+} from "./scenePlacement.mjs";
 import { softSeatPlayersFromSessionDocs } from "./softSeatPlayers.mjs";
 
 const SESSION_FOLDER_TYPES = ["Actor", "Item", "Scene", "JournalEntry"];
@@ -126,21 +131,113 @@ function belongsToSession(doc, session, ids) {
   if (parent && ids.has(parent)) {
     return true;
   }
-  return importKeyBelongsToSession(doc.flags?.[FLAG_SCOPE]?.importKey, session.sessionCode);
+  const flags = doc.flags?.[FLAG_SCOPE] ?? {};
+  if (importKeyBelongsToSession(flags.importKey, session.sessionCode)) {
+    return true;
+  }
+  // Item Pile actors stamped with sessionCode (folder may have been cleared).
+  if (
+    flags.kind === "item-pile" &&
+    flags.sessionCode &&
+    String(flags.sessionCode) === String(session.sessionCode)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True when this actor is a seated PC that must survive session delete.
+ * Item Pile actors (even if typed as "character" by the Item Piles setting) are never PCs.
+ */
+export function isSessionProtectedPc(actor) {
+  if (!actor || actor.type !== "character") {
+    return false;
+  }
+  return !isDlfiItemPileActor(actor);
+}
+
+/**
+ * Collect Item Pile world Actors referenced by tokens on session scenes
+ * (covers orphans that lost folder / flags).
+ * @param {Iterable<object>} scenes
+ * @param {object} [world]
+ * @returns {object[]}
+ */
+export function collectItemPileActorsFromScenes(scenes, world = game) {
+  /** @type {Map<string, object>} */
+  const byId = new Map();
+  for (const scene of scenes ?? []) {
+    const tokens = [...(scene?.tokens?.contents ?? scene?.tokens ?? [])];
+    for (const token of tokens) {
+      if (!isLocationItemPilePlaceholderToken(token) && !token?.flags?.[FLAG_SCOPE]?.kind) {
+        // Still check actor for item-piles flags when token wasn't tagged.
+      }
+      const actorId = tokenActorId(token);
+      if (!actorId || byId.has(actorId)) {
+        continue;
+      }
+      const actor = world?.actors?.get?.(actorId) ?? null;
+      const tokenIsPile = isLocationItemPilePlaceholderToken(token);
+      if (tokenIsPile || isDlfiItemPileActor(actor)) {
+        if (actor) {
+          byId.set(actorId, actor);
+        } else {
+          byId.set(actorId, { id: actorId });
+        }
+      }
+    }
+  }
+  return [...byId.values()];
 }
 
 /**
  * World documents belonging to an imported session.
  * Character actors (PCs) are reported separately and never deleted.
+ * Item Pile actors are always deletable (never counted as PCs).
  */
 export function collectSessionDocuments(session, world = game) {
   const ids = allFolderIds(session);
   const pick = (collection) => [...(collection ?? [])].filter((doc) => belongsToSession(doc, session, ids));
+  const scenes = pick(world.scenes);
   const actors = pick(world.actors);
+
+  // Merge pile actors still linked from scene tokens (folder/flag orphans).
+  const fromScenes = collectItemPileActorsFromScenes(scenes, world);
+  /** @type {Map<string, object>} */
+  const actorById = new Map(actors.map((actor) => [actor.id, actor]));
+  for (const pile of fromScenes) {
+    if (pile?.id && !actorById.has(pile.id)) {
+      actorById.set(pile.id, pile);
+    }
+  }
+
+  // Also sweep world actors stamped as item-piles for this session's import keys /
+  // sessionCode even when not in a session folder (common after token-only clears).
+  const importKeys = new Set(session.importKeys ?? []);
+  for (const actor of world.actors ?? []) {
+    if (!actor?.id || actorById.has(actor.id)) {
+      continue;
+    }
+    if (!isDlfiItemPileActor(actor)) {
+      continue;
+    }
+    const flags = actor.flags?.[FLAG_SCOPE] ?? {};
+    if (
+      (flags.sessionCode && String(flags.sessionCode) === String(session.sessionCode)) ||
+      (flags.importKey &&
+        (importKeys.has(flags.importKey) ||
+          importKeyBelongsToSession(flags.importKey, session.sessionCode)))
+    ) {
+      actorById.set(actor.id, actor);
+    }
+  }
+
+  const allActors = [...actorById.values()];
   return {
-    scenes: pick(world.scenes),
-    actors: actors.filter((actor) => actor.type !== "character"),
-    pcs: actors.filter((actor) => actor.type === "character"),
+    scenes,
+    actors: allActors.filter((actor) => !isSessionProtectedPc(actor)),
+    pcs: allActors.filter((actor) => isSessionProtectedPc(actor)),
     items: pick(world.items),
     journals: pick(world.journal)
   };

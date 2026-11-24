@@ -107,6 +107,7 @@ const {
   ITEM_PILE_PLACEHOLDER_NAME_RE,
   ITEM_PILES_MODULE_ID,
   ITEM_PILES_MODULE_ID_LEGACY,
+  isDlfiItemPileActor,
   isItemPilesActive,
   isLocationItemPilePlaceholderToken,
   itemPileEntriesMatch,
@@ -116,6 +117,7 @@ const {
   pileActorItemsList,
   sceneCanvasMetrics,
   selectLandingPcSlots,
+  tokenActorId,
   tokenPlacementSpec
 } = await import("./scenePlacement.mjs");
 const { ITEM_PILES_FOLDER_NAME, PC_ACTOR_FOLDER_NAME } = await import("../constants.mjs");
@@ -737,12 +739,44 @@ for (const path of paths) {
   );
   assert(faces.length === 3, "three face tiles under thumb");
   assert(faces[0].flags.dlfi.kind === "matt-nav-face", "face tile flagged");
-  // Inside thumb: y = parent.y + height - size - inset
-  const expectedFaceY = 200 + 252 - faces[0].height - 10;
+  const faceSize = faces[0].width;
+  const faceScale = faces[0].texture.scaleX;
+  assert(faceScale === 1.2, "face texture scaled 1.2× for token ring");
+  // Visible bottom = y + size + overflow; overflow = size*(scale-1)/2 → y = parent.y + ph - size - overflow
+  const overflow = (faceSize * (faceScale - 1)) / 2;
+  const expectedFaceY = Math.round(200 + 252 - faceSize - overflow);
   assert(faces[0].y === expectedFaceY, `faces sit on thumb bottom (got ${faces[0].y}, want ${expectedFaceY})`);
   assert(faces[0].texture.src === "tokens/a.webp", "face uses token art");
-  const mid = faces[0].x + faces[0].width / 2;
-  assert(mid > 100 && mid < 100 + 448, "face centered within thumb width");
+  const rowWidth = 3 * faceSize + 2 * 6;
+  const expectedStartX = Math.round(100 + (448 - rowWidth) / 2);
+  assert(faces[0].x === expectedStartX, `face row centered (got ${faces[0].x}, want ${expectedStartX})`);
+
+  // Foundry Documents do not enumerate x/y/w/h — spread must not be used.
+  const ghostDoc = {
+    id: "ghost",
+    get x() {
+      return 500;
+    },
+    get y() {
+      return 600;
+    },
+    get width() {
+      return 448;
+    },
+    get height() {
+      return 252;
+    },
+    flags: { dlfi: { targetSceneId: "Scene.x" } }
+  };
+  const { navTileGeometry } = await import("./mattSceneNav.mjs");
+  const geom = navTileGeometry(ghostDoc);
+  assert(geom.x === 500 && geom.width === 448, "navTileGeometry reads Document getters");
+  const fromGeom = buildNavFaceTiles(ghostDoc, [{ img: "t.webp", name: "A" }]);
+  assert(
+    fromGeom[0].x === Math.round(500 + (448 - fromGeom[0].width) / 2),
+    "single face centered on Document tile (getter geometry)"
+  );
+  assert(tokenActorId({ actorId: "abc" }) === "abc", "tokenActorId reads actorId");
 
   const { mattNavTooltipText } = await import("../canvas/mattNavTooltip.mjs");
   assert(
@@ -1739,6 +1773,22 @@ for (const path of paths) {
       actor("a_npc", "SESSION_014"),
       actor("a_pc", "SESSION_014", "character"),
       { id: "a_moved", type: "npc", folder: null, flags: { dlfi: { importKey: "SESSION_014_2026-01-01T00-00-00-000Z" } } },
+      // Item pile typed as character (Item Piles actorClassType) + orphan outside folder.
+      {
+        id: "a_pile_char",
+        type: "character",
+        folder: null,
+        flags: {
+          dlfi: { kind: "item-pile", importKey: "SESSION_014_2026-01-01T00-00-00-000Z", sessionCode: "SESSION_014" },
+          "item-piles": { data: { type: "pile", enabled: true } }
+        }
+      },
+      {
+        id: "a_pile_folder",
+        type: "npc",
+        folder: { id: "f_SESSION_014_Actor" },
+        flags: { dlfi: { kind: "item-pile", sessionCode: "SESSION_014" }, "item-piles": { data: { type: "pile" } } }
+      },
       actor("a_other", "SESSION_01"),
       { id: "a_user", type: "npc", folder: null, flags: {} }
     ]),
@@ -1778,8 +1828,15 @@ for (const path of paths) {
   assert(listed[0].sessionCode === "SESSION_014", "newest import first");
   assert(listed[0].isLive === true && listed[1].isLive === false, "live flag from setting");
   assert(
-    listed[0].counts.scenes === 2 && listed[0].counts.actors === 2 && listed[0].counts.pcs === 1,
-    "counts include folder docs + flagged docs, PCs separate"
+    listed[0].counts.scenes === 2 &&
+      listed[0].counts.actors === 4 &&
+      listed[0].counts.pcs === 1,
+    "counts include folder docs + flagged docs + item piles; PCs separate"
+  );
+  assert(isDlfiItemPileActor(game.actors.get("a_pile_char")), "character-typed pile still a pile");
+  assert(
+    !sessions.isSessionProtectedPc(game.actors.get("a_pile_char")),
+    "item pile actors are never protected PCs"
   );
 
   const activated = await sessions.activateImportedSession("SESSION_01");
@@ -1809,8 +1866,16 @@ for (const path of paths) {
     };
     const results = await sessions.deleteImportedSessions(["SESSION_014"], { deleteAssets: true, importsPath: "dlfi-imports" });
     const docs = results[0].docs;
-    assert(docs.scenes === 2 && docs.actors === 2 && docs.journals === 1 && docs.keptPcs === 1, "bulk delete removes session docs, keeps PCs");
-    assert(calls.deleted.includes("Actor:a_npc,a_moved"), "bulk delete includes flagged moved actor");
+    assert(
+      docs.scenes === 2 && docs.actors === 4 && docs.journals === 1 && docs.keptPcs === 1,
+      "bulk delete removes session docs + item piles, keeps PCs"
+    );
+    const actorDelete = calls.deleted.find((d) => d.startsWith("Actor:")) || "";
+    assert(actorDelete.includes("a_npc") && actorDelete.includes("a_moved"), "bulk delete includes flagged moved actor");
+    assert(
+      actorDelete.includes("a_pile_char") && actorDelete.includes("a_pile_folder"),
+      "bulk delete removes item-pile actors (even character-typed / folderless)"
+    );
     assert(!calls.deleted.some((d) => d.includes("a_pc") || d.includes("a_user") || d.includes("sc_user")), "bulk delete spares PCs and user docs");
     assert(game.folders.every((f) => f.flags?.dlfi?.sessionCode !== "SESSION_014"), "session folders deleted");
     assert(

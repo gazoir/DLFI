@@ -382,9 +382,45 @@ function escapeHtmlLite(value) {
 }
 
 /**
- * Remove Expo "Item 1…N" placeholders and prior DLFI / Item Piles tokens.
+ * True when an Actor is a DLFI / Item Piles loot pile (never a seated PC).
+ * @param {Actor|object|null|undefined} actor
+ * @returns {boolean}
+ */
+export function isDlfiItemPileActor(actor) {
+  if (!actor) {
+    return false;
+  }
+  const flags = actor.flags ?? {};
+  if (flags[FLAG_SCOPE]?.kind === "item-pile" || flags[FLAG_SCOPE]?.itemPile) {
+    return true;
+  }
+  const pile = flags[ITEM_PILES_FLAG_SCOPE] ?? flags.itempiles;
+  if (pile?.data?.enabled || pile?.enabled || pile?.data?.type === "pile") {
+    return true;
+  }
+  return Boolean(pile?.data?.type === "pile" || pile?.type === "pile");
+}
+
+/**
+ * Actor id referenced by a token (linked or unlinked base actor).
+ * @param {object} token
+ * @returns {string|null}
+ */
+export function tokenActorId(token) {
+  return (
+    token?.actorId ??
+    token?.actor?.id ??
+    token?.actor?._id ??
+    (typeof token?.actor === "string" ? token.actor : null) ??
+    null
+  );
+}
+
+/**
+ * Remove Expo "Item 1…N" placeholders and prior DLFI / Item Piles tokens,
+ * and delete the world Actors those piles pointed at (tokens alone leave orphans).
  * @param {Scene} scene
- * @returns {Promise<number>} deleted count
+ * @returns {Promise<number>} deleted token count
  */
 export async function clearLocationItemPileTokens(scene) {
   if (!scene) return 0;
@@ -393,9 +429,34 @@ export async function clearLocationItemPileTokens(scene) {
   if (!ids.length) {
     return 0;
   }
+
+  /** @type {Set<string>} */
+  const actorIds = new Set();
+  for (const token of prior) {
+    const actorId = tokenActorId(token);
+    if (!actorId) {
+      continue;
+    }
+    const actor = globalThis.game?.actors?.get?.(actorId) ?? null;
+    if (!actor || isDlfiItemPileActor(actor) || isLocationItemPilePlaceholderToken(token)) {
+      actorIds.add(actorId);
+    }
+  }
+
   await scene.deleteEmbeddedDocuments("Token", ids);
+  if (actorIds.size && globalThis.Actor?.deleteDocuments) {
+    try {
+      await Actor.deleteDocuments([...actorIds]);
+    } catch (error) {
+      console.warn(
+        `${MODULE_ID} | ${scene.name}: could not delete ${actorIds.size} item-pile actor(s) after token clear`,
+        error
+      );
+    }
+  }
   console.log(
-    `${MODULE_ID} | ${scene.name}: cleared ${ids.length} Item Pile placeholder/prior token(s)`
+    `${MODULE_ID} | ${scene.name}: cleared ${ids.length} Item Pile token(s)` +
+      (actorIds.size ? ` + ${actorIds.size} actor(s)` : "")
   );
   return ids.length;
 }
@@ -407,7 +468,15 @@ export async function clearLocationItemPileTokens(scene) {
  *
  * @param {string|null|undefined} actorUuid
  * @param {Item|object|null} item
- * @param {{ img?: string|null, folderId?: string|null, name?: string|null }} [opts]
+ * @param {{
+ *   img?: string|null,
+ *   folderId?: string|null,
+ *   name?: string|null,
+ *   importKey?: string|null,
+ *   sessionCode?: string|null,
+ *   dlceId?: string|null,
+ *   itemUuid?: string|null
+ * }} [opts]
  */
 export async function finalizeItemPileActor(actorUuid, item, opts = {}) {
   if (!actorUuid || !globalThis.fromUuid) {
@@ -429,6 +498,20 @@ export async function finalizeItemPileActor(actorUuid, item, opts = {}) {
   }
   if (opts.folderId && (pileActor.folder?.id ?? pileActor.folder) !== opts.folderId) {
     patch.folder = opts.folderId;
+  }
+  // Tag the world Actor so session delete / replace finds it even if folder moves.
+  patch[`flags.${FLAG_SCOPE}.kind`] = "item-pile";
+  if (opts.importKey) {
+    patch[`flags.${FLAG_SCOPE}.importKey`] = String(opts.importKey);
+  }
+  if (opts.sessionCode) {
+    patch[`flags.${FLAG_SCOPE}.sessionCode`] = String(opts.sessionCode);
+  }
+  if (opts.dlceId != null) {
+    patch[`flags.${FLAG_SCOPE}.dlceId`] = opts.dlceId;
+  }
+  if (opts.itemUuid) {
+    patch[`flags.${FLAG_SCOPE}.itemUuid`] = opts.itemUuid;
   }
   if (Object.keys(patch).length) {
     await pileActor.update(patch);
@@ -501,7 +584,12 @@ export function itemPileEntriesMatch(existing, candidate) {
  *
  * @param {Scene} scene
  * @param {Array<{ item: Item, name?: string, subtype?: string, dlceId?: string|null }>} items
- * @param {{ actorFolderId?: string|null, sessionFolderName?: string|null }} [options]
+ * @param {{
+ *   actorFolderId?: string|null,
+ *   sessionFolderName?: string|null,
+ *   importKey?: string|null,
+ *   sessionCode?: string|null
+ * }} [options]
  */
 export async function placeLocationItemPiles(scene, items = [], options = {}) {
   if (!scene) return;
@@ -520,6 +608,8 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
 
   const actorFolderId = options.actorFolderId ?? null;
   const sessionFolderName = options.sessionFolderName ?? null;
+  const importKey = options.importKey ?? null;
+  const sessionCode = options.sessionCode ?? null;
   /** @type {string[]|false} */
   const folders =
     sessionFolderName && !actorFolderId
@@ -564,7 +654,16 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
           actorOverrides: {
             name,
             ...(img ? { img } : {}),
-            ...(actorFolderId ? { folder: actorFolderId } : {})
+            ...(actorFolderId ? { folder: actorFolderId } : {}),
+            flags: {
+              [FLAG_SCOPE]: {
+                kind: "item-pile",
+                itemUuid,
+                dlceId,
+                ...(importKey ? { importKey } : {}),
+                ...(sessionCode ? { sessionCode } : {})
+              }
+            }
           },
           tokenOverrides: {
             name,
@@ -584,7 +683,9 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
               [FLAG_SCOPE]: {
                 kind: "item-pile",
                 itemUuid,
-                dlceId
+                dlceId,
+                ...(importKey ? { importKey } : {}),
+                ...(sessionCode ? { sessionCode } : {})
               }
             }
           }
@@ -600,6 +701,8 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
               [`flags.${FLAG_SCOPE}.kind`]: "item-pile",
               [`flags.${FLAG_SCOPE}.itemUuid`]: itemUuid,
               [`flags.${FLAG_SCOPE}.dlceId`]: dlceId,
+              ...(importKey ? { [`flags.${FLAG_SCOPE}.importKey`]: importKey } : {}),
+              ...(sessionCode ? { [`flags.${FLAG_SCOPE}.sessionCode`]: sessionCode } : {}),
               vision: false,
               "sight.enabled": false,
               ...(img ? { "texture.src": img } : {}),
@@ -613,7 +716,11 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
         await finalizeItemPileActor(actorUuid, null, {
           img,
           folderId: actorFolderId,
-          name
+          name,
+          importKey,
+          sessionCode,
+          dlceId,
+          itemUuid
         });
 
         placed += 1;
@@ -746,7 +853,9 @@ export async function finalizeLocationScene(
     items = [],
     skipItemPiles = false,
     itemPilesFolderId = null,
-    sessionFolderName = null
+    sessionFolderName = null,
+    importKey = null,
+    sessionCode = null
   } = {}
 ) {
   if (!scene) return;
@@ -789,9 +898,8 @@ export async function finalizeLocationScene(
   // Also clear leftover PC placeholders on location scenes
   deleteTokenIds.push(...listPcSlots(scene).map((t) => t.id));
 
-  // Drop Expo "Item 1…N" / Item Piles placeholders with unused NPC/PC slots
-  // (also cleared again inside placeLocationItemPiles before placing).
-  deleteTokenIds.push(...listDlfiItemPileTokens(scene).map((t) => t.id).filter(Boolean));
+  // Item-pile tokens are cleared (with their Actors) inside placeLocationItemPiles /
+  // clearLocationItemPileTokens — do not delete tokens here or pile Actors orphan.
 
   await deleteEmbedded(scene, deleteDrawingIds, deleteTokenIds);
 
@@ -799,7 +907,9 @@ export async function finalizeLocationScene(
   if (!skipItemPiles) {
     await placeLocationItemPiles(scene, items, {
       actorFolderId: itemPilesFolderId,
-      sessionFolderName
+      sessionFolderName,
+      importKey,
+      sessionCode
     });
   } else {
     // Module missing (caller already alerted): clear placeholders/stale piles, never place fakes.
