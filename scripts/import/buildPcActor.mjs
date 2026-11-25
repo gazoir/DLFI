@@ -8,7 +8,8 @@
  */
 
 import { escapeHtml } from "../util/html.mjs";
-import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
+import { FLAG_SCOPE, MODULE_ID, PC_ACTOR_FOLDER_NAME, TOKEN_DISPOSITION } from "../constants.mjs";
+import { isDlfiItemPileActor } from "./scenePlacement.mjs";
 import { tokenDisplayHover } from "./tokenArt.mjs";
 
 /** Default dnd5e character icon — treat as "missing" art for fill-only updates. */
@@ -64,6 +65,7 @@ export function actorHasDdbLink(actor) {
  *   tokenScale?: number|null,
  *   folderId?: string|null,
  *   importKey?: string,
+ *   sessionCode?: string|null,
  *   template?: object|null
  * }} [media]
  */
@@ -168,6 +170,7 @@ export function buildPcActorData(pc, media = {}) {
       playerName: pc?.playerName ?? null,
       playerId: pc?.playerId != null && String(pc.playerId).trim() ? String(pc.playerId).trim() : null,
       importKey: media.importKey ?? null,
+      sessionCodes: media.sessionCode ? [String(media.sessionCode)] : [],
       source: "dlce-pc-stub"
     }
   };
@@ -183,11 +186,23 @@ export function buildPcActorData(pc, media = {}) {
  *
  * @param {Actor} actor
  * @param {object} pc
- * @param {{ portrait?: string|null, token?: string|null, tokenScale?: number|null }} media
+ * @param {{ portrait?: string|null, token?: string|null, tokenScale?: number|null, sessionCode?: string|null }} media
  * @returns {object} Foundry update diff (may be empty aside from disposition/displayName)
  */
 export function buildExistingPcFillPatch(actor, pc, media = {}) {
   const patch = {};
+  const dlfiFlags = actor?.flags?.[FLAG_SCOPE] ?? {};
+  // Session membership: a PC reused in a later session keeps its first importKey.
+  if (media.sessionCode) {
+    const codes = new Set((Array.isArray(dlfiFlags.sessionCodes) ? dlfiFlags.sessionCodes : []).map(String));
+    if (!codes.has(String(media.sessionCode))) {
+      codes.add(String(media.sessionCode));
+      patch[`flags.${FLAG_SCOPE}.sessionCodes`] = [...codes];
+    }
+  }
+  if (pc?.id && !dlfiFlags.dlceId) {
+    patch[`flags.${FLAG_SCOPE}.dlceId`] = String(pc.id);
+  }
   const portrait = media.portrait || null;
   const token = media.token || null;
   const fullName = String(pc?.name || "").trim() || null;
@@ -266,6 +281,64 @@ export function buildExistingPcFillPatch(actor, pc, media = {}) {
   patch["prototypeToken.displayName"] = tokenDisplayHover();
 
   return patch;
+}
+
+/**
+ * Find the world character Actor for a package PC. Only `character` Actors
+ * (never Item Piles) are considered, in order: DLCE id, D&D Beyond id (explicit
+ * or parsed from the URL), stored full name, then actor name vs full name /
+ * Known as (Damned Lucky folder preferred). Stubs are named Known as, so a
+ * plain full-name compare alone would duplicate PCs on every re-import.
+ * @param {object} pc
+ * @param {Iterable<Actor>} [actors]
+ * @returns {Actor|null}
+ */
+export function matchExistingPcActor(pc, actors = globalThis.game?.actors ?? []) {
+  const pcs = [...actors].filter((actor) => actor?.type === "character" && !isDlfiItemPileActor(actor));
+  const dlfi = (actor) => actor.flags?.[FLAG_SCOPE] ?? {};
+  const norm = (value) => String(value ?? "").trim().toLowerCase();
+
+  const dlceId = String(pc?.id ?? "").trim();
+  if (dlceId) {
+    const byDlce = pcs.find((actor) => String(dlfi(actor).dlceId ?? "") === dlceId);
+    if (byDlce) return byDlce;
+  }
+
+  const ddbId =
+    (pc?.ddbId != null && String(pc.ddbId).trim()) || parseDdbCharacterId(pc?.ddbUrl) || "";
+  if (ddbId) {
+    const byDdb = pcs.find((actor) => {
+      const flags = actor.flags ?? {};
+      return [
+        flags?.ddbimporter?.dndbeyond?.characterId,
+        parseDdbCharacterId(flags?.ddbimporter?.dndbeyond?.url),
+        flags?.ddbimporter?.id,
+        flags?.["ddb-importer"]?.id,
+        dlfi(actor).ddbId
+      ].some((value) => value != null && String(value) === ddbId);
+    });
+    if (byDdb) return byDdb;
+  }
+
+  const fullName = norm(pc?.name);
+  if (fullName) {
+    const byFullName = pcs.find((actor) => norm(dlfi(actor).fullName) === fullName);
+    if (byFullName) return byFullName;
+  }
+
+  const names = new Set([fullName, norm(pc?.knownAs)].filter(Boolean));
+  if (!names.size) {
+    return null;
+  }
+  const byName = pcs.filter((actor) => names.has(norm(actor.name)));
+  const inPcFolder = (actor) => {
+    const folder = actor.folder;
+    return (
+      folder?.name === PC_ACTOR_FOLDER_NAME ||
+      folder?.flags?.[FLAG_SCOPE]?.kind === "pc-library"
+    );
+  };
+  return byName.find(inPcFolder) ?? byName[0] ?? null;
 }
 
 /**

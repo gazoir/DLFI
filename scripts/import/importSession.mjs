@@ -23,7 +23,8 @@ import {
   alertEmptyPcs,
   alertPcStubResults,
   buildExistingPcFillPatch,
-  buildPcActorData
+  buildPcActorData,
+  matchExistingPcActor
 } from "./buildPcActor.mjs";
 import {
   applySceneBackground,
@@ -80,11 +81,21 @@ import {
   ensureChildFolder,
   ensurePcActorFolder,
   ensureSessionFolders,
+  navSceneIdsFor,
   setExclusiveSceneNavigation
 } from "./folders.mjs";
-import { purgeSessionAssets, purgeSessionDocuments } from "./sessions.mjs";
+import {
+  purgeSessionAssets,
+  purgeSnapshot,
+  rollbackImport,
+  snapshotFolderIds,
+  snapshotIds,
+  snapshotSessionDocuments
+} from "./sessions.mjs";
 import {
   ensureDataFolder,
+  isSafePackagePath,
+  mapWithConcurrency,
   normalizeDataPath,
   packageImportRoot,
   uploadDataFile
@@ -99,26 +110,71 @@ function decodeText(bytes) {
   return new TextDecoder("utf-8").decode(bytes);
 }
 
+/** Parallel uploads during import (Foundry handles a few concurrent POSTs well). */
+const UPLOAD_CONCURRENCY = 4;
+/** Foundry's default sort spacing between sibling documents. */
+const SORT_STEP = 100000;
+
 /**
  * Upload a package asset into the DLFI imports tree, preserving the zip-relative path.
  * e.g. assets/portraits/loc_trader.webp → dlfi-imports/{packageRoot}/assets/portraits/…
  * @param {string} packagePath
  * @param {Uint8Array} bytes
  * @param {string} importsRoot e.g. dlfi-imports/SESSION_014__Name__stamp
+ * @param {Set<string>} [cache] Data folders already ensured this import
+ * @returns {Promise<string|null>} world path, or null when rejected / failed
  */
-async function uploadAsset(packagePath, bytes, importsRoot) {
-  const relative = String(packagePath || "").replace(/^\/+/, "").replace(/\\/g, "/");
-  const target = `${normalizeDataPath(importsRoot)}/${relative}`;
+export async function uploadAsset(packagePath, bytes, importsRoot, cache) {
+  const relative = String(packagePath || "").replace(/\\/g, "/");
+  const root = normalizeDataPath(importsRoot);
+  if (!isSafePackagePath(relative)) {
+    console.warn(`${MODULE_ID} | refusing unsafe package path ${JSON.stringify(packagePath)}`);
+    return null;
+  }
+  const target = `${root}/${relative}`;
+  if (!root || !target.startsWith(`${root}/`)) {
+    return null;
+  }
   const parts = target.split("/");
   const name = parts.pop();
   const folder = parts.join("/");
   try {
-    const uploaded = await uploadDataFile(folder, name, bytes);
-    return uploaded || target;
+    const uploaded = await uploadDataFile(folder, name, bytes, { cache });
+    if (!uploaded) {
+      console.warn(`${MODULE_ID} | upload rejected by Foundry for ${target}`);
+    }
+    return uploaded;
   } catch (error) {
     console.warn(`${MODULE_ID} | upload failed for ${target}`, error);
     return null;
   }
+}
+
+/**
+ * Template clone (or bare Scene) with name / nav / folder / flags already set;
+ * a follow-up update is sent only for fields the template path did not apply.
+ * @param {string} settingKey
+ * @param {string} name
+ * @param {{ folderId?: string|null, flags: object, navigation: boolean }} options
+ */
+async function createSessionScene(settingKey, name, { folderId = null, flags, navigation }) {
+  const scene =
+    (await duplicateTemplateScene(settingKey, name, { folderId, flags })) ??
+    (await Scene.create({ name, navigation, folder: folderId, flags }));
+  const patch = {};
+  if (scene.name !== name) patch.name = name;
+  if ((scene.navName ?? "") !== "") patch.navName = "";
+  if (Boolean(scene.navigation) !== navigation) patch.navigation = navigation;
+  if ((scene.folder?.id ?? scene.folder ?? null) !== folderId) patch.folder = folderId;
+  const want = flags?.[FLAG_SCOPE] ?? {};
+  const have = scene.flags?.[FLAG_SCOPE] ?? {};
+  if (Object.keys(want).some((key) => JSON.stringify(have[key]) !== JSON.stringify(want[key]))) {
+    patch.flags = { [FLAG_SCOPE]: want };
+  }
+  if (Object.keys(patch).length) {
+    await scene.update(patch);
+  }
+  return scene;
 }
 
 /**
@@ -249,29 +305,24 @@ export async function importSessionPackage(loaded, options = {}) {
 
   const replaceExisting =
     options.replaceExisting ?? setting(SETTING_REPLACE_ON_REIMPORT) !== false;
-  if (replaceExisting) {
-    progress("replace previous import (documents + assets)");
-    try {
-      const removed = await purgeSessionDocuments(manifest.sessionCode);
-      const assets = await purgeSessionAssets(
-        manifest.sessionCode,
-        String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports"
-      );
-      if (removed || assets.dirs.length) {
-        progress("replaced previous import", { removed, assets });
-      } else {
-        progress("no previous import to replace");
-      }
-    } catch (error) {
-      console.warn(`${MODULE_ID} | could not remove previous import of ${manifest.sessionCode}`, error);
-    }
+  // The previous import is only frozen here; it is purged after the new one is live.
+  const previous = snapshotSessionDocuments(manifest.sessionCode);
+  const previousIds = snapshotIds(previous);
+  if (previous) {
+    progress(replaceExisting ? "previous import found (replaced on success)" : "previous import kept", {
+      scenes: previous.docs.scenes.length,
+      actors: previous.docs.actors.length
+    });
   }
 
   progress("ensure session folders");
   const { name: folderName, folders, meta: sessionFolderMeta } = await ensureSessionFolders(
     manifest,
-    importKey
+    importKey,
+    { excludeIds: replaceExisting ? snapshotFolderIds(previous) : new Set() }
   );
+  let committed = false;
+  try {
   progress("ensure PC Actor folder", { name: PC_ACTOR_FOLDER_NAME });
   const pcActorFolder = await ensurePcActorFolder();
   progress("ensure Item Piles Actor folder", {
@@ -287,7 +338,8 @@ export async function importSessionPackage(loaded, options = {}) {
   const uploaded = new Map();
   const importsBase = String(setting(SETTING_IMPORTS) || "dlfi-imports").trim() || "dlfi-imports";
   const packageRoot = packageImportRoot(manifest, loaded.sourceLabel);
-  const importsRoot = await ensureDataFolder(`${importsBase}/${packageRoot}`);
+  const ensuredFolders = new Set();
+  const importsRoot = await ensureDataFolder(`${importsBase}/${packageRoot}`, { cache: ensuredFolders });
   progress("upload assets", { importsRoot });
 
   // Create parent folders from whatever uploadable paths the package contains
@@ -304,7 +356,7 @@ export async function importSessionPackage(loaded, options = {}) {
   }
   for (const sub of assetFolders) {
     try {
-      await ensureDataFolder(`${importsRoot}/${sub}`);
+      await ensureDataFolder(`${importsRoot}/${sub}`, { cache: ensuredFolders });
     } catch (error) {
       console.warn(`${MODULE_ID} | precreate ${sub} failed`, error);
     }
@@ -315,19 +367,23 @@ export async function importSessionPackage(loaded, options = {}) {
   const uploadable = [...files.entries()].filter(([path]) => shouldUploadPackagePath(path));
   const uploadTotal = uploadable.length;
   let uploadIndex = 0;
-  for (const [path, bytes] of uploadable) {
+  const uploadResults = await mapWithConcurrency(uploadable, UPLOAD_CONCURRENCY, async ([path, bytes]) => {
+    const worldPath = await uploadAsset(path, bytes, importsRoot, ensuredFolders);
     uploadIndex += 1;
     if (uploadIndex === 1 || uploadIndex === uploadTotal || uploadIndex % 25 === 0) {
-      progress(`uploading asset ${uploadIndex}/${uploadTotal}`, path);
+      progress(`uploaded asset ${uploadIndex}/${uploadTotal}`, path);
     }
-    const worldPath = await uploadAsset(path, bytes, importsRoot);
+    return worldPath;
+  });
+  uploadable.forEach(([path], index) => {
+    const worldPath = uploadResults[index];
     if (worldPath) {
       uploaded.set(path, worldPath);
       uploadOk += 1;
     } else {
       uploadFailures += 1;
     }
-  }
+  });
   progress("assets uploaded", { ok: uploadOk, failed: uploadFailures, total: uploadTotal });
   if (uploadFailures) {
     notify(`DLFI: ${uploadFailures} asset upload(s) failed — check console for paths.`, {
@@ -335,20 +391,26 @@ export async function importSessionPackage(loaded, options = {}) {
     });
   }
 
+  /** @type {Map<string, object|null>} parsed package JSON, once per file */
+  const parsedDocuments = new Map();
   const readDocument = (file) => {
     if (!file) {
       return null;
     }
+    if (parsedDocuments.has(file)) {
+      return parsedDocuments.get(file);
+    }
     const bytes = files.get(file);
-    if (!bytes) {
-      return null;
+    let parsed = null;
+    if (bytes) {
+      try {
+        parsed = decodeJson(bytes);
+      } catch (error) {
+        console.warn(`${MODULE_ID} | failed to parse ${file}`, error);
+      }
     }
-    try {
-      return decodeJson(bytes);
-    } catch (error) {
-      console.warn(`${MODULE_ID} | failed to parse ${file}`, error);
-      return null;
-    }
+    parsedDocuments.set(file, parsed);
+    return parsed;
   };
 
   /** @type {Map<string, string>} dlce id -> Foundry doc uuid */
@@ -384,28 +446,15 @@ export async function importSessionPackage(loaded, options = {}) {
     const dmName = formatSceneDmName(kind, entry, order);
 
     if (kind === "location") {
-      let scene =
-        (await duplicateTemplateScene(SETTING_TEMPLATE_LOCATION, dmName, {
-          folderId: folders.Scene?.id ?? null,
-          flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
-        })) ??
-        (await Scene.create({
-          name: dmName,
-          navigation: true,
-          folder: folders.Scene?.id ?? null,
-          flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
-        }));
+      const scene = await createSessionScene(SETTING_TEMPLATE_LOCATION, dmName, {
+        folderId: folders.Scene?.id ?? null,
+        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } },
+        navigation: true
+      });
 
       const bg = resolveLocationBackground(entry, uploaded);
-      await scene.update({
-        name: dmName,
-        navName: "",
-        navigation: true,
-        folder: folders.Scene?.id ?? null,
-        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "location", importKey } }
-      });
       if (bg) {
-        await applySceneBackground(scene, bg);
+        await applySceneBackground(scene, bg, { refreshThumb: false });
       } else {
         console.warn(
           `${MODULE_ID} | no location artwork for ${entry.id} (${entry.name}); tried portrait=${entry.portrait ?? "—"}`
@@ -439,27 +488,15 @@ export async function importSessionPackage(loaded, options = {}) {
       uploaded,
       assetPaths: battlemapAssetPaths
     });
-    let scene =
-      (await duplicateTemplateScene(SETTING_TEMPLATE_BATTLEMAP, dmName, {
-        folderId: folders.Scene?.id ?? null,
-        flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
-      })) ??
-      (await Scene.create({
-        name: dmName,
-        navigation: true,
-        folder: folders.Scene?.id ?? null
-      }));
-    await scene.update({
-      name: dmName,
-      navName: "",
-      navigation: true,
-      folder: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } }
+    const scene = await createSessionScene(SETTING_TEMPLATE_BATTLEMAP, dmName, {
+      folderId: folders.Scene?.id ?? null,
+      flags: { [FLAG_SCOPE]: { dlceId: entry.id, kind: "battlemap", importKey } },
+      navigation: true
     });
     if (!mapPath) {
       console.warn(`${MODULE_ID} | no colour battlemap found for ${entry.id} (${entry.name})`);
     } else {
-      await applySceneBackground(scene, mapPath);
+      await applySceneBackground(scene, mapPath, { refreshThumb: false });
     }
     sessionSceneIds.push(scene.id);
     createdByDlceId.set(entry.id, scene.uuid);
@@ -485,21 +522,9 @@ export async function importSessionPackage(loaded, options = {}) {
   const landingName = formatSpecialSceneName("landing", manifest, lastMsdOrder);
   const outroName = formatSpecialSceneName("outro", manifest, lastMsdOrder);
   const leftoversName = formatSpecialSceneName("leftovers", manifest, lastMsdOrder);
-  let landing =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_LANDING, landingName, {
-      folderId: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { kind: "landing", importKey } }
-    })) ??
-    (await Scene.create({
-      name: landingName,
-      navigation: true,
-      folder: folders.Scene?.id ?? null
-    }));
-  await landing.update({
-    name: landingName,
-    navName: "",
+  const landing = await createSessionScene(SETTING_TEMPLATE_LANDING, landingName, {
+    folderId: folders.Scene?.id ?? null,
     navigation: true,
-    folder: folders.Scene?.id ?? null,
     flags: {
       [FLAG_SCOPE]: {
         kind: "landing",
@@ -518,7 +543,7 @@ export async function importSessionPackage(loaded, options = {}) {
     }
   });
   if (landingArt.background) {
-    await applySceneBackground(landing, landingArt.background);
+    await applySceneBackground(landing, landingArt.background, { refreshThumb: false });
     console.log(
       `${MODULE_ID} | Landing background → ${landingArt.background}` +
         (landingArt.clean ? " (Clean)" : landingArt.logoBurn ? " (Logo_Burn fallback)" : "")
@@ -552,22 +577,9 @@ export async function importSessionPackage(loaded, options = {}) {
   landingScene = landing;
 
   // --- Outro (Thanks for Playing) — Landing-like; user owns the Thanks tile on the template ---
-  let outro =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_OUTRO, outroName, {
-      folderId: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { kind: "outro", importKey } }
-    })) ??
-    (await Scene.create({
-      name: outroName,
-      navigation: true,
-      folder: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { kind: "outro", importKey } }
-    }));
-  await outro.update({
-    name: outroName,
-    navName: "",
+  const outro = await createSessionScene(SETTING_TEMPLATE_OUTRO, outroName, {
+    folderId: folders.Scene?.id ?? null,
     navigation: true,
-    folder: folders.Scene?.id ?? null,
     flags: {
       [FLAG_SCOPE]: {
         kind: "outro",
@@ -578,31 +590,38 @@ export async function importSessionPackage(loaded, options = {}) {
   });
   // Same Clean session art as Landing background; do not swap Logo/Title tiles.
   if (landingArt.background) {
-    await applySceneBackground(outro, landingArt.background);
+    await applySceneBackground(outro, landingArt.background, { refreshThumb: false });
   }
   sessionSceneIds.push(outro.id);
   outroScene = outro;
 
   // --- Leftovers (formerly Inbox): catch-all for unplaced NPCs/items ---
-  let leftovers =
-    (await duplicateTemplateScene(SETTING_TEMPLATE_INBOX, leftoversName, {
-      folderId: folders.Scene?.id ?? null,
-      flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } }
-    })) ??
-    (await Scene.create({
-      name: leftoversName,
-      navigation: false,
-      folder: folders.Scene?.id ?? null
-    }));
-  await leftovers.update({
-    name: leftoversName,
-    navName: "",
-    navigation: false,
-    folder: folders.Scene?.id ?? null,
-    flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } }
+  const leftovers = await createSessionScene(SETTING_TEMPLATE_INBOX, leftoversName, {
+    folderId: folders.Scene?.id ?? null,
+    flags: { [FLAG_SCOPE]: { kind: "leftovers", importKey } },
+    navigation: false
   });
   leftoversScene = leftovers;
   sessionSceneIds.push(leftovers.id);
+
+  // Nav bar + Scene Directory order: Landing → MSD sequence → Outro → Leftovers.
+  {
+    const ordered = [
+      landing,
+      ...sceneSequence
+        .map((step) =>
+          step.kind === "location"
+            ? locationSceneMeta.get(step.entry.id)?.scene
+            : battlemapMeta.find((meta) => meta.entry === step.entry)?.scene
+        )
+        .filter(Boolean),
+      outro,
+      leftovers
+    ].filter((scene, index, list) => scene && list.indexOf(scene) === index);
+    await Scene.updateDocuments(
+      ordered.map((scene, index) => ({ _id: scene.id, navOrder: index, sort: (index + 1) * SORT_STEP }))
+    );
+  }
 
   // --- NPCs / monsters as Actors ---
   /** @type {Map<string, Actor>} */
@@ -625,10 +644,10 @@ export async function importSessionPackage(loaded, options = {}) {
     }))
   );
 
-  for (const entry of npcEntries) {
+  const npcActorData = npcEntries.map((entry) => {
     const raw = npcRawById.get(entry.id) ?? {};
     const { portrait, token, tokenSlots, tokenWildcard } = resolveNpcMedia(entry, uploaded);
-    const actorData = buildNpcNpcActorData(raw, entry, {
+    return buildNpcNpcActorData(raw, entry, {
       portrait,
       token,
       tokenSlots,
@@ -638,7 +657,11 @@ export async function importSessionPackage(loaded, options = {}) {
       folderId: folders.Actor?.id ?? null,
       importKey
     });
-    const actor = await Actor.create(actorData);
+  });
+  const npcActors = npcActorData.length ? await Actor.createDocuments(npcActorData) : [];
+  for (const [index, entry] of npcEntries.entries()) {
+    const raw = npcRawById.get(entry.id) ?? {};
+    const actor = npcActors[index];
     createdByDlceId.set(entry.id, actor.uuid);
     actorsByDlceId.set(entry.id, actor);
     npcRecords.push({ entry, raw, actor });
@@ -691,55 +714,76 @@ export async function importSessionPackage(loaded, options = {}) {
     );
   }
 
+  /** @type {Array<{ actor: Actor|null, pc: object, stubData?: object }>} */
+  const pcRows = [];
   for (const pc of manifestPcs) {
     const portrait = pc.portrait ? uploaded.get(pc.portrait) || null : null;
     const token = pc.token ? uploaded.get(pc.token) || null : null;
-    let actor = matchExistingPcActor(pc);
+    const actor = matchExistingPcActor(pc);
     if (actor) {
       progress(`match existing PC ${pc.knownAs || pc.name || pc.id}`, actor.uuid);
       const patch = buildExistingPcFillPatch(actor, pc, {
         portrait,
         token,
-        tokenScale: pc.tokenScale
+        tokenScale: pc.tokenScale,
+        sessionCode: manifest.sessionCode
       });
       if (Object.keys(patch).length) {
         await actor.update(patch);
       }
-    } else {
-      progress(`create PC stub ${pc.knownAs || pc.name || pc.id}`, {
-        folder: PC_ACTOR_FOLDER_NAME,
-        ddbUrl: pc.ddbUrl ?? null,
-        portrait: Boolean(portrait),
-        token: Boolean(token)
-      });
-      const actorData = buildPcActorData(pc, {
+      pcRows.push({ actor, pc });
+      continue;
+    }
+    progress(`create PC stub ${pc.knownAs || pc.name || pc.id}`, {
+      folder: PC_ACTOR_FOLDER_NAME,
+      ddbUrl: pc.ddbUrl ?? null,
+      portrait: Boolean(portrait),
+      token: Boolean(token)
+    });
+    pcRows.push({
+      actor: null,
+      pc,
+      stubData: buildPcActorData(pc, {
         portrait,
         token,
         tokenScale: pc.tokenScale,
         folderId: pcActorFolder?.id ?? null,
         importKey,
+        sessionCode: manifest.sessionCode,
         template: pcActorTemplate
+      })
+    });
+  }
+  const stubRows = pcRows.filter((row) => row.stubData);
+  const stubActors = stubRows.length
+    ? await Actor.createDocuments(stubRows.map((row) => row.stubData))
+    : [];
+  stubRows.forEach((row, index) => {
+    row.actor = stubActors[index];
+    const { pc, actor } = row;
+    const stubInfo = {
+      name: String(pc.name || actor.name || "").trim() || actor.name,
+      knownAs: pc.knownAs ?? null,
+      ddbUrl: pc.ddbUrl ?? null,
+      id: pc.id ?? null
+    };
+    createdPcStubs.push(stubInfo);
+    if (!String(pc.ddbUrl || "").trim() && !(pc.ddbId != null && String(pc.ddbId).trim())) {
+      pcsMissingDdb.push({
+        name: stubInfo.name,
+        knownAs: stubInfo.knownAs,
+        id: stubInfo.id
       });
-      actor = await Actor.create(actorData);
-      const stubInfo = {
-        name: String(pc.name || actor.name || "").trim() || actor.name,
-        knownAs: pc.knownAs ?? null,
-        ddbUrl: pc.ddbUrl ?? null,
-        id: pc.id ?? null
-      };
-      createdPcStubs.push(stubInfo);
-      if (!String(pc.ddbUrl || "").trim() && !(pc.ddbId != null && String(pc.ddbId).trim())) {
-        pcsMissingDdb.push({
-          name: stubInfo.name,
-          knownAs: stubInfo.knownAs,
-          id: stubInfo.id
-        });
-      }
-      console.log(
-        `${MODULE_ID} | created PC stub ${actor.name}` +
-          (pc.ddbUrl ? ` (DDB ${pc.ddbId || pc.ddbUrl})` : " (no DDB URL)")
-      );
     }
+    console.log(
+      `${MODULE_ID} | created PC stub ${actor.name}` +
+        (pc.ddbUrl ? ` (DDB ${pc.ddbId || pc.ddbUrl})` : " (no DDB URL)")
+    );
+  });
+
+  /** @type {Array<{ data: object, ownerPcId: string, pet: object }>} */
+  const petRows = [];
+  for (const { actor, pc } of pcRows) {
     if (pc.id) {
       createdByDlceId.set(pc.id, actor.uuid);
       pcActorsByDlceId.set(String(pc.id), actor);
@@ -776,13 +820,17 @@ export async function importSessionPackage(loaded, options = {}) {
           dlceId: pet.id
         }
       };
-      const petActor = await Actor.create(petActorData);
-      createdByDlceId.set(pet.id, petActor.uuid);
-      actorsByDlceId.set(pet.id, petActor);
-      sessionPets.push({ actor: petActor, ownerPcId: String(pet.ownerPcId || pc.id || ""), pet });
-      placedNpcIds.add(pet.id);
+      petRows.push({ data: petActorData, ownerPcId: String(pet.ownerPcId || pc.id || ""), pet });
     }
   }
+  const petActors = petRows.length ? await Actor.createDocuments(petRows.map((row) => row.data)) : [];
+  petRows.forEach(({ ownerPcId, pet }, index) => {
+    const petActor = petActors[index];
+    createdByDlceId.set(pet.id, petActor.uuid);
+    actorsByDlceId.set(pet.id, petActor);
+    sessionPets.push({ actor: petActor, ownerPcId, pet });
+    placedNpcIds.add(pet.id);
+  });
 
   // --- Items (before location finalize so piles land with NPCs/descriptions) ---
   /** @type {Map<string, string[]>} locationId -> item uuids */
@@ -792,20 +840,28 @@ export async function importSessionPackage(loaded, options = {}) {
   const itemEntries = (manifest.documents ?? []).filter((d) => d.type === "item");
   progress("create items", { count: itemEntries.length });
   const reverseItemLocations = buildItemLocationsFromLocationLinks(locations, readDocument);
-  for (const entry of itemEntries) {
+  const itemRows = itemEntries.map((entry) => {
     const raw = readDocument(entry.file) ?? {};
     const portrait = entry.portrait ? uploaded.get(entry.portrait) : null;
     const fields = raw?.fields ?? {};
     const subtype = entry.subtype ?? fields.subtype ?? "plot";
-    const item = await Item.create(
-      buildItemCreateData({
+    return {
+      entry,
+      raw,
+      portrait,
+      subtype,
+      data: buildItemCreateData({
         entry: { ...entry, subtype },
         fields,
         portraitWorldPath: portrait || null,
         folderId: folders.Item?.id ?? null,
         importKey
       })
-    );
+    };
+  });
+  const createdItems = itemRows.length ? await Item.createDocuments(itemRows.map((row) => row.data)) : [];
+  for (const [index, { entry, raw, portrait, subtype }] of itemRows.entries()) {
+    const item = createdItems[index];
     createdByDlceId.set(entry.id, item.uuid);
     const locationIds = collectItemLocationIds(
       entry,
@@ -1114,13 +1170,13 @@ export async function importSessionPackage(loaded, options = {}) {
   const itemPages = [];
   for (const entry of locations) {
     const uuids = itemsByLocation.get(entry.id) ?? [];
-    const lines = uuids.length
-      ? uuids.map((uuid) => `- @UUID[${uuid}]`)
-      : ["_No items linked to this location._"];
+    const body = uuids.length
+      ? `<ul>${uuids.map((uuid) => `<li>@UUID[${uuid}]</li>`).join("")}</ul>`
+      : "<p><em>No items linked to this location.</em></p>";
     itemPages.push({
       name: entry.name,
       type: "text",
-      text: { content: `<h2>${escapeHtml(entry.name)}</h2><p>${lines.join("<br>")}</p>`, format: 1 }
+      text: { content: `<h2>${escapeHtml(entry.name)}</h2>${body}`, format: 1 }
     });
   }
   if (itemPages.length) {
@@ -1156,12 +1212,36 @@ export async function importSessionPackage(loaded, options = {}) {
     });
   }
 
-  await setExclusiveSceneNavigation(new Set(sessionSceneIds));
+  await setExclusiveSceneNavigation(navSceneIdsFor(sessionSceneIds.map((id) => game.scenes.get(id))));
   if (landing?.id) {
     await landing.activate(true);
   }
 
   await setSetting(SETTING_LIVE_SESSION, sessionKey(manifest));
+  committed = true;
+
+  if (replaceExisting && previous) {
+    progress("remove previous import (documents + assets)");
+    try {
+      const removed = await purgeSnapshot(previous, game, { clearLive: false });
+      const assets = await purgeSessionAssets(manifest.sessionCode, importsBase, {
+        exceptDirs: [importsRoot]
+      });
+      progress("removed previous import", { removed, assets });
+      if (assets.remainingDirs.length) {
+        notify(
+          `DLFI: Foundry cannot delete files here — remove old asset folder(s) by hand: ` +
+            assets.remainingDirs.map((dir) => `Data/${dir}`).join(", "),
+          { type: "warning" }
+        );
+      }
+    } catch (error) {
+      console.warn(`${MODULE_ID} | could not remove previous import of ${manifest.sessionCode}`, error);
+      notify(`DLFI: imported, but the previous ${manifest.displayCode ?? manifest.sessionCode} import could not be fully removed — see console.`, {
+        type: "warning"
+      });
+    }
+  }
 
   try {
     progress("scene directory thumbnails", { scenes: sessionSceneIds.length });
@@ -1213,31 +1293,17 @@ export async function importSessionPackage(loaded, options = {}) {
     outroId: outroScene?.id ?? null,
     leftoversId: leftoversScene?.id ?? null
   };
-}
-
-
-function matchExistingPcActor(pc) {
-  const ddbId = pc?.ddbId != null ? String(pc.ddbId).trim() : "";
-  const name = String(pc?.name || "").trim().toLowerCase();
-  const actors = [...(game.actors ?? [])];
-  if (ddbId) {
-    const byDdb = actors.find((actor) => {
-      const flags = actor.flags ?? {};
-      const candidates = [
-        flags?.ddbimporter?.dndbeyond?.characterId,
-        flags?.ddbimporter?.id,
-        flags?.["ddb-importer"]?.id,
-        flags?.[FLAG_SCOPE]?.ddbId
-      ];
-      return candidates.some((value) => value != null && String(value) === ddbId);
-    });
-    if (byDdb) {
-      return byDdb;
+  } catch (error) {
+    if (committed) {
+      throw error;
     }
+    console.error(`${MODULE_ID} | import of ${manifest.sessionCode} failed — rolling back`, error);
+    try {
+      const rolledBack = await rollbackImport(importKey, Object.values(folders), { keepIds: previousIds });
+      console.warn(`${MODULE_ID} | rolled back partial import`, rolledBack);
+    } catch (rollbackError) {
+      console.error(`${MODULE_ID} | rollback failed`, rollbackError);
+    }
+    throw error;
   }
-  if (!name) {
-    return null;
-  }
-  return actors.find((actor) => String(actor.name || "").trim().toLowerCase() === name) ?? null;
 }
-

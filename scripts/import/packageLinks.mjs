@@ -3,15 +3,16 @@
  */
 
 /**
- * Build npcId → locationId[] from location documents that link *to* NPCs
- * (e.g. loc_trader "Owned by" → npc_kira_brannardor).
- * DLCE often stores the ownership link only on the location, not the NPC.
+ * targetId → locationId[] for every location link to `targetType`
+ * (e.g. loc_trader "Owned by" → npc_kira, "Contains" → itm_ring, "Hosts" → chal_x).
+ * DLCE often stores these links only on the location.
  *
  * @param {Iterable<{ id: string, file?: string }>} locationEntries
  * @param {(file: string) => object|null} readDocument
+ * @param {string} targetType "npc" | "item" | "challenge"
  * @returns {Map<string, string[]>}
  */
-export function buildNpcLocationsFromLocationLinks(locationEntries, readDocument) {
+export function buildReverseLinkIndex(locationEntries, readDocument, targetType) {
   /** @type {Map<string, string[]>} */
   const map = new Map();
   for (const entry of locationEntries ?? []) {
@@ -21,18 +22,31 @@ export function buildNpcLocationsFromLocationLinks(locationEntries, readDocument
     }
     const raw = typeof readDocument === "function" ? readDocument(entry.file) : null;
     for (const link of raw?.links ?? []) {
-      if (link?.target_type !== "npc" || !link?.target_id) {
+      if (link?.target_type !== targetType || !link?.target_id) {
         continue;
       }
-      const npcId = String(link.target_id);
-      const list = map.get(npcId) ?? [];
+      const targetId = String(link.target_id);
+      const list = map.get(targetId) ?? [];
       if (!list.includes(locationId)) {
         list.push(locationId);
       }
-      map.set(npcId, list);
+      map.set(targetId, list);
     }
   }
   return map;
+}
+
+/**
+ * Build npcId → locationId[] from location documents that link *to* NPCs
+ * (e.g. loc_trader "Owned by" → npc_kira_brannardor).
+ * DLCE often stores the ownership link only on the location, not the NPC.
+ *
+ * @param {Iterable<{ id: string, file?: string }>} locationEntries
+ * @param {(file: string) => object|null} readDocument
+ * @returns {Map<string, string[]>}
+ */
+export function buildNpcLocationsFromLocationLinks(locationEntries, readDocument) {
+  return buildReverseLinkIndex(locationEntries, readDocument, "npc");
 }
 
 /**
@@ -69,27 +83,7 @@ export function collectNpcLocationIds(entry, raw, reverseLocationIds = []) {
  * @returns {Map<string, string[]>}
  */
 export function buildItemLocationsFromLocationLinks(locationEntries, readDocument) {
-  /** @type {Map<string, string[]>} */
-  const map = new Map();
-  for (const entry of locationEntries ?? []) {
-    const locationId = String(entry?.id ?? "");
-    if (!locationId) {
-      continue;
-    }
-    const raw = typeof readDocument === "function" ? readDocument(entry.file) : null;
-    for (const link of raw?.links ?? []) {
-      if (link?.target_type !== "item" || !link?.target_id) {
-        continue;
-      }
-      const itemId = String(link.target_id);
-      const list = map.get(itemId) ?? [];
-      if (!list.includes(locationId)) {
-        list.push(locationId);
-      }
-      map.set(itemId, list);
-    }
-  }
-  return map;
+  return buildReverseLinkIndex(locationEntries, readDocument, "item");
 }
 
 /**
@@ -130,27 +124,7 @@ export function collectItemLocationIds(entry, raw, reverseLocationIds = []) {
  * @returns {Map<string, string[]>}
  */
 export function buildChallengeHostLocations(locationEntries, readDocument) {
-  /** @type {Map<string, string[]>} */
-  const map = new Map();
-  for (const entry of locationEntries ?? []) {
-    const locationId = String(entry?.id ?? "");
-    if (!locationId) {
-      continue;
-    }
-    const raw = typeof readDocument === "function" ? readDocument(entry.file) : null;
-    for (const link of raw?.links ?? []) {
-      if (link?.target_type !== "challenge" || !link?.target_id) {
-        continue;
-      }
-      const challengeId = String(link.target_id);
-      const list = map.get(challengeId) ?? [];
-      if (!list.includes(locationId)) {
-        list.push(locationId);
-      }
-      map.set(challengeId, list);
-    }
-  }
-  return map;
+  return buildReverseLinkIndex(locationEntries, readDocument, "challenge");
 }
 
 /**
@@ -494,7 +468,12 @@ function normalizeEnemyField(value) {
   }
   if (!Array.isArray(parsed)) {
     if (parsed && typeof parsed === "object") {
-      parsed = Object.entries(parsed).map(([npcId, count]) => ({ npcId, count }));
+      const singleEnemy = ["world_document_id", "worldDocumentId", "npcId", "npc_id", "id", "target_id", "enemy_id", "name"].some(
+        (key) => typeof parsed[key] === "string" && parsed[key]
+      );
+      parsed = singleEnemy
+        ? [parsed]
+        : Object.entries(parsed).map(([npcId, count]) => ({ npcId, count }));
     } else {
       return [];
     }
