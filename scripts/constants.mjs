@@ -24,6 +24,7 @@ export const SETTING_REPLACE_ON_REIMPORT = "replaceOnReimport";
  * When false, Player-role accounts are soft-hidden (role NONE + `_` name prefix).
  */
 export const SETTING_PLAYERS_UNLOCKED = "playersUnlocked";
+export const SETTING_SUPPRESS_LOADING_BARS = "suppressPlayerLoadingBars";
 
 /** Keep this many zip copies per session under the DLCE inbox. */
 export const INBOX_KEEP_PER_SESSION = 3;

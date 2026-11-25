@@ -14,6 +14,7 @@ import {
   SETTING_PLAYERS_UNLOCKED,
   SETTING_REPLACE_ON_REIMPORT,
   SETTING_SPELL_PACKS,
+  SETTING_SUPPRESS_LOADING_BARS,
   SETTING_TEMPLATE_BATTLEMAP,
   SETTING_TEMPLATE_INBOX,
   SETTING_TEMPLATE_LANDING,
@@ -34,6 +35,9 @@ import {
   unlockPlayersLogin
 } from "./import/softSeatPlayers.mjs";
 import { openDamnedLuckyApp } from "./ui/DamnedLuckyApp.mjs";
+
+/** canvasReady handlers registered in init; replayed in ready for the first scene. */
+const canvasReadyHandlers = [];
 
 async function unlockLiveSessionPlayers() {
   const seats = seatsFromPcActors(liveSessionPcActors());
@@ -139,6 +143,20 @@ Hooks.once("init", () => {
     default: false
   });
 
+  game.settings.register(MODULE_ID, SETTING_SUPPRESS_LOADING_BARS, {
+    name: "Suppress loading bars for players",
+    hint: "Hide Foundry's \"Loading <scene>\" progress bar on player clients when a scene loads. GMs still see it.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+
+  // Register canvas hooks before the first canvasReady fires.
+  registerSuppressSceneLoadingBar();
+  canvasReadyHandlers.push(registerHideLandingEffectsHooks().onCanvasReady);
+  canvasReadyHandlers.push(registerMattNavTooltipHooks().onCanvasReady);
+
   game.settings.registerMenu(MODULE_ID, "openDamnedLucky", {
     name: "Damned Lucky",
     label: "Open Damned Lucky",
@@ -153,9 +171,18 @@ Hooks.once("ready", () => {
   console.log(
     `${MODULE_ID} | ready (packageFormatVersion ${PACKAGE_FORMAT_VERSION}). Open Damned Lucky from scene controls or Configure Settings.`
   );
-  registerSuppressSceneLoadingBar();
-  registerHideLandingEffectsHooks();
-  registerMattNavTooltipHooks();
+  if (globalThis.canvas?.ready) {
+    for (const handler of canvasReadyHandlers) {
+      try {
+        handler(globalThis.canvas);
+      } catch (error) {
+        console.warn(`${MODULE_ID} | canvasReady replay failed`, error);
+      }
+    }
+  }
+  if (!game.user?.isGM) {
+    return;
+  }
   // Create storage roots so Refresh / Import do not fail on a missing folder.
   void (async () => {
     try {

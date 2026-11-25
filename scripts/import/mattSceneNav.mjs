@@ -10,7 +10,7 @@
  * from Scene 10 (1-based).
  */
 
-import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { FLAG_SCOPE, MODULE_ID, notify } from "../constants.mjs";
 import { resolveSceneBackgroundSrc } from "./applySceneBackground.mjs";
 import { sceneCanvasMetrics } from "./scenePlacement.mjs";
 
@@ -92,12 +92,17 @@ export function isMattNavSlotTile(tile) {
   if (isProtectedArtTile(tile)) {
     return false;
   }
-  const w = Math.max(1, Number(tile.width) || 1);
-  const h = Math.max(1, Number(tile.height) || 1);
-  if (Math.max(w, h) > NAV_TILE_MAX_EDGE) {
-    return false;
-  }
-  return true;
+  return !isOversizedTile(tile);
+}
+
+/**
+ * Backgrounds / centre art: too big to be a nav thumbnail.
+ * @param {object} tile
+ */
+export function isOversizedTile(tile) {
+  const w = Math.max(1, Number(tile?.width) || 1);
+  const h = Math.max(1, Number(tile?.height) || 1);
+  return Math.max(w, h) > NAV_TILE_MAX_EDGE;
 }
 
 /**
@@ -379,7 +384,7 @@ export function listMattNavFaceTileIds(scene) {
 
 /**
  * Disable accidental MATT triggers on Logo/Title Only / Thanks for Playing tiles
- * without changing their texture or geometry.
+ * and on any oversized tile (never a nav slot), without changing texture or geometry.
  * @param {Scene} scene
  * @returns {object[]}
  */
@@ -392,11 +397,14 @@ export function protectedArtMattStripUpdates(scene) {
     if (kind === "matt-nav-face") {
       continue;
     }
-    if (!isProtectedArtTile(tile)) {
+    if (!isProtectedArtTile(tile) && !isOversizedTile(tile)) {
       continue;
     }
     const matt = tile.flags?.[MONKS_ACTIVE_TILES_ID];
     if (!matt || typeof matt !== "object") {
+      continue;
+    }
+    if (matt.active === false && !(matt.actions ?? []).length) {
       continue;
     }
     const id = tile.id ?? tile._id;
@@ -570,9 +578,13 @@ export async function populateAllMattSceneNav(opts) {
     return { scenes: 0, updated: 0, deleted: 0 };
   }
   if (!isMonksActiveTilesActive()) {
-    console.warn(
-      `${MODULE_ID} | Monk's Active Tile Triggers not active — skipping scene-nav tile population`
-    );
+    const message =
+      "Monk's Active Tile Triggers is not active — scene-nav tiles were left as template placeholders. Enable MATT and re-import or Sync.";
+    if (globalThis.ui?.notifications && globalThis.game?.user?.isGM) {
+      notify(message, { type: "warn" });
+    } else {
+      console.warn(`${MODULE_ID} | ${message}`);
+    }
     return { scenes: 0, updated: 0, deleted: 0, skipped: true };
   }
 

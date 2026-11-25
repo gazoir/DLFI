@@ -3,7 +3,7 @@
  * `flags.dlfi.hideTokenEffects`), while keeping tokens clickable with names.
  */
 
-import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { FLAG_SCOPE } from "../constants.mjs";
 
 /**
  * @param {object|null|undefined} scene
@@ -21,67 +21,44 @@ export function sceneHidesTokenEffects(scene) {
 }
 
 /**
- * Clear drawn effect icons on a Token placeable without touching sheet/nameplate.
+ * Hide the effect-icon container on a Token placeable. The sprites stay owned
+ * by Foundry (no detach / destroy), so redraws and status changes keep working.
  * @param {Token} token
  */
 export function clearTokenEffectIcons(token) {
   const effects = token?.effects;
-  if (!effects) {
+  if (effects && effects.visible !== false) {
+    effects.visible = false;
+  }
+}
+
+/**
+ * @param {object} canvas
+ */
+export function hideLandingEffectsOnCanvas(canvas) {
+  if (!sceneHidesTokenEffects(canvas?.scene)) {
     return;
   }
-  try {
-    if (typeof effects.removeChildren === "function") {
-      effects.removeChildren();
-    } else if (Array.isArray(effects.children)) {
-      for (const child of [...effects.children]) {
-        child.destroy?.({ children: true });
-      }
-    }
-    if ("visible" in effects) {
-      effects.visible = false;
-    }
-  } catch (error) {
-    console.debug(`${MODULE_ID} | could not clear token effects`, error);
+  for (const token of canvas.tokens?.placeables ?? []) {
+    clearTokenEffectIcons(token);
   }
 }
 
 /**
  * Register canvas hooks so Landing token effect icons stay hidden.
+ * @returns {{ onCanvasReady: (canvas: object) => void }}
  */
 export function registerHideLandingEffectsHooks() {
   const hideIfNeeded = (token) => {
     const scene = token?.scene ?? globalThis.canvas?.scene;
-    if (!sceneHidesTokenEffects(scene)) {
-      return;
+    if (sceneHidesTokenEffects(scene)) {
+      clearTokenEffectIcons(token);
     }
-    clearTokenEffectIcons(token);
   };
 
-  Hooks.on("refreshToken", hideIfNeeded);
+  // refreshToken runs after every effect redraw / status toggle.
   Hooks.on("drawToken", hideIfNeeded);
-  Hooks.on("updateToken", (doc) => {
-    const token = doc?.object ?? globalThis.canvas?.tokens?.get?.(doc.id);
-    if (token) {
-      hideIfNeeded(token);
-    }
-  });
-  Hooks.on("applyTokenStatusEffect", () => {
-    const scene = globalThis.canvas?.scene;
-    if (!sceneHidesTokenEffects(scene)) {
-      return;
-    }
-    for (const token of globalThis.canvas?.tokens?.placeables ?? []) {
-      clearTokenEffectIcons(token);
-    }
-  });
-
-  // After scene draw, sweep once so already-placed tokens are clean.
-  Hooks.on("canvasReady", (canvas) => {
-    if (!sceneHidesTokenEffects(canvas?.scene)) {
-      return;
-    }
-    for (const token of canvas.tokens?.placeables ?? []) {
-      clearTokenEffectIcons(token);
-    }
-  });
+  Hooks.on("refreshToken", hideIfNeeded);
+  Hooks.on("canvasReady", hideLandingEffectsOnCanvas);
+  return { onCanvasReady: hideLandingEffectsOnCanvas };
 }

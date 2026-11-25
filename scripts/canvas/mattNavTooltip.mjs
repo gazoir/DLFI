@@ -40,12 +40,16 @@ function ensureTooltipEl() {
   return el;
 }
 
+/** Cached size of the tooltip for its current text (avoids layout per move). */
+let tooltipSize = null;
+
 function hideTooltip() {
   const el = document.getElementById(TOOLTIP_ID);
   if (el) {
     el.style.display = "none";
     el.textContent = "";
   }
+  tooltipSize = null;
   try {
     globalThis.game?.tooltip?.deactivate?.();
   } catch (_error) {
@@ -60,11 +64,14 @@ function hideTooltip() {
  */
 function showTooltip(text, clientX, clientY) {
   const el = ensureTooltipEl();
-  el.textContent = text;
-  el.style.display = "block";
+  if (el.textContent !== text || el.style.display !== "block" || !tooltipSize) {
+    el.textContent = text;
+    el.style.display = "block";
+    const measured = el.getBoundingClientRect();
+    tooltipSize = { width: measured.width, height: measured.height };
+  }
   const pad = 14;
-  // Measure after show so width is accurate.
-  const rect = el.getBoundingClientRect();
+  const rect = tooltipSize;
   let left = clientX + pad;
   let top = clientY + pad;
   if (left + rect.width > window.innerWidth - 8) {
@@ -151,15 +158,7 @@ export function mattNavTileBounds(tile) {
   if (kind !== "matt-nav-left" && kind !== "matt-nav-right") {
     return null;
   }
-  let data = null;
-  try {
-    if (typeof doc.toObject === "function") {
-      data = doc.toObject();
-    }
-  } catch (_error) {
-    data = null;
-  }
-  const src = data ?? doc._source ?? doc;
+  const src = doc._source ?? doc;
   const x = Number(src.x);
   const y = Number(src.y);
   const w = Number(src.width);
@@ -194,8 +193,8 @@ export function findMattNavTileAt(canvas, worldX, worldY) {
       hits.push(tile);
     }
   }
-  if (!hits.length) {
-    // Fallback: documents on the scene (placeables may be empty mid-draw).
+  if (!placeables.length) {
+    // Fallback: documents on the scene (placeables are empty mid-draw).
     const docs = canvas?.scene?.tiles?.contents ?? [];
     for (const doc of docs) {
       const box = mattNavTileBounds(doc);
@@ -224,6 +223,7 @@ let activeTooltipText = "";
 
 /**
  * Register canvas hover hooks for MATT scene-nav tiles.
+ * @returns {{ onCanvasReady: (canvas: object) => void }}
  */
 export function registerMattNavTooltipHooks() {
   // Still listen in case the Tiles layer is active.
@@ -249,14 +249,28 @@ export function registerMattNavTooltipHooks() {
     }
   });
 
-  Hooks.on("canvasReady", (canvas) => {
+  const onCanvasReady = (canvas) => {
     const view = canvas?.app?.view;
     if (!view || view.getAttribute(HIT_ATTR) === "1") {
       return;
     }
     view.setAttribute(HIT_ATTR, "1");
 
+    // One hit-test per animation frame, using the latest pointer position.
+    let pending = null;
     const onMove = (ev) => {
+      const first = pending == null;
+      pending = { clientX: ev.clientX, clientY: ev.clientY };
+      if (first) {
+        requestAnimationFrame(flush);
+      }
+    };
+    const flush = () => {
+      const ev = pending;
+      pending = null;
+      if (!ev) {
+        return;
+      }
       try {
         const world = clientToCanvasPoint(canvas, ev.clientX, ev.clientY);
         if (!world) {
@@ -282,16 +296,19 @@ export function registerMattNavTooltipHooks() {
     };
 
     const onLeave = () => {
+      pending = null;
       activeTooltipText = "";
       hideTooltip();
     };
 
     view.addEventListener("pointermove", onMove);
     view.addEventListener("pointerleave", onLeave);
-  });
+  };
+  Hooks.on("canvasReady", onCanvasReady);
 
   Hooks.on("canvasTearDown", () => {
     activeTooltipText = "";
     hideTooltip();
   });
+  return { onCanvasReady };
 }

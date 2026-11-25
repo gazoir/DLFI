@@ -1128,15 +1128,13 @@ for (const path of paths) {
       name: "01. 📍 Korbane Village Approach",
       sort: 1,
       flags: { dlfi: { kind: "matt-nav-left" } },
-      toObject() {
-        return {
-          x: 720,
-          y: 300,
-          width: 448,
-          height: 252,
-          texture: { anchorX: 0.5, anchorY: 0.5 },
-          flags: this.flags
-        };
+      _source: {
+        x: 720,
+        y: 300,
+        width: 448,
+        height: 252,
+        texture: { anchorX: 0.5, anchorY: 0.5 },
+        flags: { dlfi: { kind: "matt-nav-left" } }
       }
     },
     // Inflated/wrong placeable bounds must be ignored.
@@ -1159,6 +1157,13 @@ for (const path of paths) {
     "hit-test still hits visible top-left of thumb"
   );
   assert(navTileAxisBounds(korbaneParent).x === 496, "navTileAxisBounds left edge");
+  const decoyCanvas = {
+    tiles: { placeables: [tipTile] },
+    scene: { tiles: { contents: [{ ...tipTile.document, name: "stale doc" }] } }
+  };
+  assert(findMattNavTileAt(decoyCanvas, 1000, 500) == null, "no document fallback scan when placeables exist");
+  const midDraw = { tiles: { placeables: [] }, scene: { tiles: { contents: [tipTile.document] } } };
+  assert(findMattNavTileAt(midDraw, 720, 300)?.name === tipTile.document.name, "document fallback while placeables empty");
 
   const { mattNavTooltipText } = await import("../canvas/mattNavTooltip.mjs");
   assert(
@@ -2829,6 +2834,63 @@ for (const path of paths) {
   await unlockPlayersLogin({ world: lockWorld });
   assert(users.find((u) => u.id === "u_player")?.role === USER_ROLE.PLAYER, "unlock restores Player");
   assert(users.find((u) => u.id === "u_player")?.name === "Sam", "unlock strips _");
+}
+
+{
+  const { shouldSuppressLoadingBar, isSceneLoadingMessage, registerSuppressSceneLoadingBar } = await import(
+    "../canvas/suppressSceneLoadingBar.mjs"
+  );
+  assert(shouldSuppressLoadingBar({ isGM: false }, () => true), "players: suppressed when setting on");
+  assert(!shouldSuppressLoadingBar({ isGM: false }, () => false), "players: shown when setting off");
+  assert(!shouldSuppressLoadingBar({ isGM: true }, () => true), "GM always sees loading bars");
+  assert(isSceneLoadingMessage("Loading Korbane", "Loading {name}"), "scene loading message recognised");
+  assert(!isSceneLoadingMessage("Loading modules", "SCENE.Loading"), "untranslated key never matches");
+
+  const calls = [];
+  class FakeLoader {
+    load(sources, options = {}) {
+      calls.push(options.displayProgress);
+      return Promise.resolve();
+    }
+    static loader = new FakeLoader();
+    static loadSceneTextures() {
+      return this.loader.load([], { message: "x" });
+    }
+  }
+  const savedGame = globalThis.game;
+  globalThis.game = { user: { isGM: false }, settings: { get: () => true }, i18n: { localize: (k) => k } };
+  registerSuppressSceneLoadingBar(FakeLoader);
+  await FakeLoader.loadSceneTextures();
+  await FakeLoader.loader.load([], {});
+  assert(calls[0] === false, "scene texture load hides progress for players");
+  assert(calls[1] === undefined, "non-scene load keeps its progress bar");
+  globalThis.game = savedGame;
+
+  const { protectedArtMattStripUpdates } = await import("./mattSceneNav.mjs");
+  const armed = { actions: [{ action: "scene" }], active: true };
+  const stripScene = {
+    tiles: [
+      { id: "t_bg", name: "Backdrop", width: 1920, height: 1080, flags: { "monks-active-tiles": armed } },
+      { id: "t_nav", name: "Nav", width: 448, height: 252, flags: { "monks-active-tiles": armed } },
+      {
+        id: "t_done",
+        name: "Old",
+        width: 1600,
+        height: 900,
+        flags: { "monks-active-tiles": { active: false, actions: [] } }
+      }
+    ]
+  };
+  const stripIds = protectedArtMattStripUpdates(stripScene).map((u) => u._id);
+  assert(stripIds.includes("t_bg"), "oversized MATT tile disarmed");
+  assert(!stripIds.includes("t_nav"), "nav-sized MATT tile left armed");
+  assert(!stripIds.includes("t_done"), "already-disarmed tile not re-updated");
+
+  const { clearTokenEffectIcons } = await import("../canvas/hideLandingEffects.mjs");
+  let removed = false;
+  const token = { effects: { visible: true, removeChildren: () => (removed = true) } };
+  clearTokenEffectIcons(token);
+  assert(token.effects.visible === false && !removed, "landing effects hidden without detaching sprites");
 }
 
 {
