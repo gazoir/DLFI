@@ -12,6 +12,7 @@
  * assets/landing/, or paths named in manifest.landingPage / sessionArt.
  */
 
+import { isSafePackagePath } from "../package/dataFolders.mjs";
 import { lookupUploaded } from "./resolvePackageAsset.mjs";
 
 const IMAGE_EXT = /\.(webp|png|jpg|jpeg|webm|avif)$/i;
@@ -26,7 +27,7 @@ export const LANDING_PAGE_FOLDER_RE =
  */
 export function shouldUploadPackagePath(packagePath) {
   const path = String(packagePath || "").replace(/^\/+/, "").replace(/\\/g, "/");
-  if (!path || path.endsWith("/")) {
+  if (!path || path.endsWith("/") || !isSafePackagePath(path)) {
     return false;
   }
   if (path.startsWith("assets/")) {
@@ -54,7 +55,7 @@ export function classifyLandingFileName(fileName) {
   if (!base) {
     return null;
   }
-  if (/logo_?burn|burned|burn_?in|with_?logo/.test(base)) {
+  if (/(^|_)(logo_?burn|burned|burn_?in|with_?logo)($|_)/.test(base)) {
     return "logoBurn";
   }
   if (/logo_?only|only_?logo|^logo$/.test(base)) {
@@ -86,6 +87,8 @@ export function classifyLandingFileName(fileName) {
 export function resolveLandingPageArt(manifest, uploaded) {
   /** @type {Record<string, { packagePath: string, worldPath: string }>} */
   const found = {};
+  /** @type {Array<{ packagePath: string, worldPath: string }>} */
+  const unclassified = [];
 
   const manifestLanding = asObject(manifest?.landingPage);
   const named = {
@@ -112,7 +115,7 @@ export function resolveLandingPageArt(manifest, uploaded) {
   ];
 
   for (const packagePath of assetList) {
-    considerPath(found, packagePath, uploaded.get(String(packagePath).replace(/^\/+/, "").replace(/\\/g, "/")));
+    considerPath(found, packagePath, uploaded.get(String(packagePath).replace(/^\/+/, "").replace(/\\/g, "/")), unclassified);
   }
 
   for (const [packagePath, worldPath] of uploaded.entries()) {
@@ -121,7 +124,11 @@ export function resolveLandingPageArt(manifest, uploaded) {
     if (!inLandingFolder && !inSessionFolder) {
       continue;
     }
-    considerPath(found, packagePath, worldPath);
+    considerPath(found, packagePath, worldPath, unclassified);
+  }
+  // An unnamed Landing image only stands in for Clean once every file has been classified.
+  if (!found.clean && unclassified.length) {
+    found.clean = unclassified[0];
   }
 
   // Legacy single sessionArt path → clean (and background fallback)
@@ -297,15 +304,14 @@ export async function applyLandingPageTiles(scene, art = {}) {
   return updates.length;
 }
 
-function considerPath(found, packagePath, worldPath) {
+function considerPath(found, packagePath, worldPath, unclassified = []) {
   if (!packagePath || !worldPath) {
     return;
   }
   const kind = classifyLandingFileName(packagePath);
   if (!kind) {
-    // Unclassified file inside Landing Page folder: treat as clean if none yet.
-    if (LANDING_PAGE_FOLDER_RE.test(packagePath) && !found.clean && IMAGE_EXT.test(packagePath)) {
-      found.clean = { packagePath, worldPath };
+    if (LANDING_PAGE_FOLDER_RE.test(packagePath) && IMAGE_EXT.test(packagePath)) {
+      unclassified.push({ packagePath, worldPath });
     }
     return;
   }

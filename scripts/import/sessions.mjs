@@ -14,13 +14,13 @@ import {
   setSetting,
   setting
 } from "../constants.mjs";
-import { setExclusiveSceneNavigation } from "./folders.mjs";
+import { navSceneIdsFor, setExclusiveSceneNavigation } from "./folders.mjs";
 import { deleteDataFile, normalizeDataPath } from "../package/dataFolders.mjs";
 import { getFilePicker, isNotFoundError } from "../package/filePicker.mjs";
 import { resolveImportedSessionThumbUrl } from "./resolveLandingArt.mjs";
 import {
+  isDlfiCreatedPileActor,
   isDlfiItemPileActor,
-  isLocationItemPilePlaceholderToken,
   tokenActorId
 } from "./scenePlacement.mjs";
 import { softSeatPlayersFromSessionDocs } from "./softSeatPlayers.mjs";
@@ -126,24 +126,38 @@ function allFolderIds(session) {
   return ids;
 }
 
-function belongsToSession(doc, session, ids) {
+/**
+ * Session codes a world document belongs to: its folder, its importKey, an Item
+ * Pile `sessionCode`, or PC membership in `flags.dlfi.sessionCodes` (a PC reused
+ * across sessions keeps the importKey of its first import).
+ * @param {object} doc
+ * @param {Map<string, string>} folderToCode
+ * @param {string[]} codes
+ * @returns {Set<string>}
+ */
+function sessionCodesForDoc(doc, folderToCode, codes) {
+  const found = new Set();
   const parent = folderId(doc.folder);
-  if (parent && ids.has(parent)) {
-    return true;
+  if (parent && folderToCode.has(parent)) {
+    found.add(folderToCode.get(parent));
   }
   const flags = doc.flags?.[FLAG_SCOPE] ?? {};
-  if (importKeyBelongsToSession(flags.importKey, session.sessionCode)) {
-    return true;
+  if (flags.importKey) {
+    for (const code of codes) {
+      if (importKeyBelongsToSession(flags.importKey, code)) {
+        found.add(code);
+      }
+    }
   }
-  // Item Pile actors stamped with sessionCode (folder may have been cleared).
-  if (
-    flags.kind === "item-pile" &&
-    flags.sessionCode &&
-    String(flags.sessionCode) === String(session.sessionCode)
-  ) {
-    return true;
+  if (flags.kind === "item-pile" && flags.sessionCode && codes.includes(String(flags.sessionCode))) {
+    found.add(String(flags.sessionCode));
   }
-  return false;
+  for (const code of Array.isArray(flags.sessionCodes) ? flags.sessionCodes : []) {
+    if (codes.includes(String(code))) {
+      found.add(String(code));
+    }
+  }
+  return found;
 }
 
 /**
@@ -158,33 +172,36 @@ export function isSessionProtectedPc(actor) {
 }
 
 /**
- * Collect Item Pile world Actors referenced by tokens on session scenes
- * (covers orphans that lost folder / flags).
+ * DLFI-created Item Pile world Actors referenced by tokens on session scenes
+ * (covers piles that lost their folder). Piles stamped for another session are skipped.
  * @param {Iterable<object>} scenes
  * @param {object} [world]
+ * @param {string|null} [sessionCode]
  * @returns {object[]}
  */
-export function collectItemPileActorsFromScenes(scenes, world = game) {
+export function collectItemPileActorsFromScenes(scenes, world = game, sessionCode = null) {
   /** @type {Map<string, object>} */
   const byId = new Map();
   for (const scene of scenes ?? []) {
     const tokens = [...(scene?.tokens?.contents ?? scene?.tokens ?? [])];
     for (const token of tokens) {
-      if (!isLocationItemPilePlaceholderToken(token) && !token?.flags?.[FLAG_SCOPE]?.kind) {
-        // Still check actor for item-piles flags when token wasn't tagged.
-      }
       const actorId = tokenActorId(token);
       if (!actorId || byId.has(actorId)) {
         continue;
       }
       const actor = world?.actors?.get?.(actorId) ?? null;
-      const tokenIsPile = isLocationItemPilePlaceholderToken(token);
-      if (tokenIsPile || isDlfiItemPileActor(actor)) {
-        if (actor) {
-          byId.set(actorId, actor);
-        } else {
-          byId.set(actorId, { id: actorId });
-        }
+      if (!actor || !isDlfiCreatedPileActor(actor)) {
+        continue;
+      }
+      const flags = actor.flags?.[FLAG_SCOPE] ?? {};
+      const otherSession =
+        sessionCode &&
+        ((flags.sessionCode && String(flags.sessionCode) !== String(sessionCode)) ||
+          (!flags.sessionCode &&
+            flags.importKey &&
+            !importKeyBelongsToSession(flags.importKey, sessionCode)));
+      if (!otherSession) {
+        byId.set(actorId, actor);
       }
     }
   }
@@ -192,55 +209,61 @@ export function collectItemPileActorsFromScenes(scenes, world = game) {
 }
 
 /**
- * World documents belonging to an imported session.
+ * One pass over the world: documents per imported session code.
  * Character actors (PCs) are reported separately and never deleted.
- * Item Pile actors are always deletable (never counted as PCs).
+ * @param {Array<{ sessionCode: string, folderIds: string[], folders?: object[] }>} sessions
+ * @param {object} [world]
+ * @returns {Map<string, { scenes: object[], actors: object[], pcs: object[], items: object[], journals: object[] }>}
  */
-export function collectSessionDocuments(session, world = game) {
-  const ids = allFolderIds(session);
-  const pick = (collection) => [...(collection ?? [])].filter((doc) => belongsToSession(doc, session, ids));
-  const scenes = pick(world.scenes);
-  const actors = pick(world.actors);
-
-  // Merge pile actors still linked from scene tokens (folder/flag orphans).
-  const fromScenes = collectItemPileActorsFromScenes(scenes, world);
-  /** @type {Map<string, object>} */
-  const actorById = new Map(actors.map((actor) => [actor.id, actor]));
-  for (const pile of fromScenes) {
-    if (pile?.id && !actorById.has(pile.id)) {
-      actorById.set(pile.id, pile);
+export function buildSessionIndex(sessions, world = game) {
+  const codes = sessions.map((session) => String(session.sessionCode));
+  /** @type {Map<string, string>} */
+  const folderToCode = new Map();
+  for (const session of sessions) {
+    for (const id of allFolderIds(session)) {
+      folderToCode.set(id, String(session.sessionCode));
     }
   }
-
-  // Also sweep world actors stamped as item-piles for this session's import keys /
-  // sessionCode even when not in a session folder (common after token-only clears).
-  const importKeys = new Set(session.importKeys ?? []);
-  for (const actor of world.actors ?? []) {
-    if (!actor?.id || actorById.has(actor.id)) {
-      continue;
+  const empty = () => ({ scenes: [], actors: [], items: [], journals: [] });
+  /** @type {Map<string, ReturnType<typeof empty>>} */
+  const raw = new Map(codes.map((code) => [code, empty()]));
+  const sweep = (collection, key) => {
+    for (const doc of collection ?? []) {
+      for (const code of sessionCodesForDoc(doc, folderToCode, codes)) {
+        raw.get(code)?.[key].push(doc);
+      }
     }
-    if (!isDlfiItemPileActor(actor)) {
-      continue;
-    }
-    const flags = actor.flags?.[FLAG_SCOPE] ?? {};
-    if (
-      (flags.sessionCode && String(flags.sessionCode) === String(session.sessionCode)) ||
-      (flags.importKey &&
-        (importKeys.has(flags.importKey) ||
-          importKeyBelongsToSession(flags.importKey, session.sessionCode)))
-    ) {
-      actorById.set(actor.id, actor);
-    }
-  }
-
-  const allActors = [...actorById.values()];
-  return {
-    scenes,
-    actors: allActors.filter((actor) => !isSessionProtectedPc(actor)),
-    pcs: allActors.filter((actor) => isSessionProtectedPc(actor)),
-    items: pick(world.items),
-    journals: pick(world.journal)
   };
+  sweep(world.scenes, "scenes");
+  sweep(world.actors, "actors");
+  sweep(world.items, "items");
+  sweep(world.journal, "journals");
+
+  /** @type {Map<string, any>} */
+  const index = new Map();
+  for (const code of codes) {
+    const docs = raw.get(code);
+    const actorById = new Map(docs.actors.map((actor) => [actor.id, actor]));
+    for (const pile of collectItemPileActorsFromScenes(docs.scenes, world, code)) {
+      if (!actorById.has(pile.id)) {
+        actorById.set(pile.id, pile);
+      }
+    }
+    const allActors = [...actorById.values()];
+    index.set(code, {
+      scenes: docs.scenes,
+      actors: allActors.filter((actor) => !isSessionProtectedPc(actor)),
+      pcs: allActors.filter((actor) => isSessionProtectedPc(actor)),
+      items: docs.items,
+      journals: docs.journals
+    });
+  }
+  return index;
+}
+
+/** World documents belonging to one imported session. */
+export function collectSessionDocuments(session, world = game) {
+  return buildSessionIndex([session], world).get(String(session.sessionCode));
 }
 
 /** List imported sessions with document counts, newest import first. */
@@ -253,8 +276,9 @@ export function listImportedSessions(world = game) {
     }
   })();
   const sessions = groupSessionFolders([...(world.folders ?? [])], { liveKey });
+  const index = buildSessionIndex(sessions, world);
   return sessions.map((session) => {
-    const docs = collectSessionDocuments(session, world);
+    const docs = index.get(String(session.sessionCode));
     const landing = docs.scenes.find((scene) => scene.flags?.[FLAG_SCOPE]?.kind === "landing") ?? null;
     const thumbUrl = resolveImportedSessionThumbUrl(landing);
     const title = `${session.displayCode} · ${session.sessionName}`;
@@ -293,7 +317,7 @@ export async function activateImportedSession(sessionCode, world = game) {
   if (!docs.scenes.length) {
     throw new Error(`Imported session ${session.displayCode} has no scenes to activate.`);
   }
-  await setExclusiveSceneNavigation(new Set(docs.scenes.map((scene) => scene.id)));
+  await setExclusiveSceneNavigation(navSceneIdsFor(docs.scenes));
   const landing =
     docs.scenes.find((scene) => scene.flags?.[FLAG_SCOPE]?.kind === "landing") ?? docs.scenes[0];
   await landing.activate();
@@ -332,8 +356,10 @@ export function liveSessionPcActors(world = game) {
   return collectSessionDocuments(live, world).pcs;
 }
 
-async function deleteIds(documentClass, docs) {
-  const ids = docs.map((doc) => doc.id);
+async function deleteIds(documentClass, collection, docs) {
+  const ids = docs
+    .map((doc) => doc.id)
+    .filter((id) => id && (typeof collection?.get !== "function" || collection.get(id)));
   if (!ids.length) {
     return 0;
   }
@@ -342,29 +368,28 @@ async function deleteIds(documentClass, docs) {
 }
 
 /**
- * Delete world documents + folders for one imported session (PCs are kept and moved to root).
+ * Freeze the documents + folders of an imported session so they can be purged
+ * later without touching anything created afterwards (replace-on-reimport).
+ * @param {string} sessionCode
+ * @returns {{ session: object, docs: ReturnType<typeof collectSessionDocuments>, folders: object[] }|null}
  */
-export async function purgeSessionDocuments(sessionCode, world = game) {
+export function snapshotSessionDocuments(sessionCode, world = game) {
   const session = findSession(sessionCode, world);
   if (!session) {
     return null;
   }
-  const docs = collectSessionDocuments(session, world);
-  const summary = {
-    sessionCode,
-    displayCode: session.displayCode,
-    scenes: await deleteIds(Scene, docs.scenes),
-    actors: await deleteIds(Actor, docs.actors),
-    items: await deleteIds(Item, docs.items),
-    journals: await deleteIds(JournalEntry, docs.journals),
-    keptPcs: docs.pcs.length,
-    folders: 0
-  };
-
-  // Deepest folders first; contents already removed except kept PCs (re-parent to root).
   const folders = session.folders
     .flatMap((folder) => [folder, ...(folder.getSubfolders?.(true) ?? [])])
     .filter((folder, index, list) => list.findIndex((other) => other.id === folder.id) === index);
+  return { session, docs: collectSessionDocuments(session, world), folders };
+}
+
+/** Folder ids captured by {@link snapshotSessionDocuments}. */
+export function snapshotFolderIds(snapshot) {
+  return new Set((snapshot?.folders ?? []).map((folder) => folder.id));
+}
+
+async function deleteFoldersDeepestFirst(folders, world) {
   const depth = (folder) => {
     let count = 0;
     let parent = folderId(folder.folder);
@@ -374,41 +399,134 @@ export async function purgeSessionDocuments(sessionCode, world = game) {
     }
     return count;
   };
-  folders.sort((a, b) => depth(b) - depth(a));
-  for (const folder of folders) {
+  let deleted = 0;
+  for (const folder of [...folders].sort((a, b) => depth(b) - depth(a))) {
     const stillThere = world.folders.get ? world.folders.get(folder.id) : folder;
     if (!stillThere) {
       continue;
     }
     try {
       await stillThere.delete({ deleteSubfolders: false, deleteContents: false });
-      summary.folders += 1;
+      deleted += 1;
     } catch (error) {
       console.warn(`${MODULE_ID} | could not delete folder ${folder.name}`, error);
     }
   }
+  return deleted;
+}
 
-  if (isLiveSession(setting(SETTING_LIVE_SESSION), sessionCode)) {
+/**
+ * Delete exactly the documents + folders captured in a snapshot (PC actors are kept).
+ * @param {ReturnType<typeof snapshotSessionDocuments>} snapshot
+ * @param {{ clearLive?: boolean }} [options]
+ */
+export async function purgeSnapshot(snapshot, world = game, { clearLive = true } = {}) {
+  if (!snapshot) {
+    return null;
+  }
+  const { session, docs, folders } = snapshot;
+  const summary = {
+    sessionCode: session.sessionCode,
+    displayCode: session.displayCode,
+    scenes: await deleteIds(Scene, world.scenes, docs.scenes),
+    actors: await deleteIds(Actor, world.actors, docs.actors),
+    items: await deleteIds(Item, world.items, docs.items),
+    journals: await deleteIds(JournalEntry, world.journal, docs.journals),
+    keptPcs: docs.pcs.length,
+    folders: 0
+  };
+  summary.folders = await deleteFoldersDeepestFirst(folders, world);
+  if (clearLive && isLiveSession(setting(SETTING_LIVE_SESSION), session.sessionCode)) {
     await setSetting(SETTING_LIVE_SESSION, "");
   }
   return summary;
 }
 
 /**
- * Remove `{importsPath}/{sessionCode}__*` trees. Foundry has no official file-delete API, so
- * this is best-effort: when the first delete fails the rest are skipped and reported.
- * @returns {Promise<{ dirs: string[], filesDeleted: number, filesSkipped: number, remainingDirs: string[] }>}
+ * Delete world documents + folders for one imported session (PC actors are kept).
  */
-export async function purgeSessionAssets(sessionCode, importsPath) {
+export async function purgeSessionDocuments(sessionCode, world = game) {
+  return purgeSnapshot(snapshotSessionDocuments(sessionCode, world), world);
+}
+
+/**
+ * Undo a failed import: delete every non-PC document tagged with `importKey` or
+ * filed under the new import's folders, then those folders. Documents captured
+ * in `keepIds` (the previous import when the same export is re-imported) survive.
+ * @param {string} importKey
+ * @param {Iterable<object>} newFolders
+ * @param {{ keepIds?: Set<string> }} [options]
+ */
+export async function rollbackImport(importKey, newFolders, { keepIds = new Set() } = {}, world = game) {
+  const folders = [...(newFolders ?? [])]
+    .filter(Boolean)
+    .flatMap((folder) => [folder, ...(folder.getSubfolders?.(true) ?? [])]);
+  const folderIds = new Set(folders.map((folder) => folder.id));
+  const created = (collection) =>
+    [...(collection ?? [])].filter((doc) => {
+      if (!doc?.id || keepIds.has(doc.id)) {
+        return false;
+      }
+      const parent = folderId(doc.folder);
+      return (parent && folderIds.has(parent)) || doc.flags?.[FLAG_SCOPE]?.importKey === importKey;
+    });
+  const summary = {
+    scenes: await deleteIds(Scene, world.scenes, created(world.scenes)),
+    actors: await deleteIds(
+      Actor,
+      world.actors,
+      created(world.actors).filter((actor) => !isSessionProtectedPc(actor))
+    ),
+    items: await deleteIds(Item, world.items, created(world.items)),
+    journals: await deleteIds(JournalEntry, world.journal, created(world.journal)),
+    folders: 0
+  };
+  summary.folders = await deleteFoldersDeepestFirst(
+    folders.filter((folder) => !keepIds.has(folder.id)),
+    world
+  );
+  return summary;
+}
+
+/** Every document id in a snapshot (folders included). */
+export function snapshotIds(snapshot) {
+  const ids = snapshotFolderIds(snapshot);
+  for (const list of Object.values(snapshot?.docs ?? {})) {
+    for (const doc of list ?? []) {
+      if (doc?.id) ids.add(doc.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Remove `{importsPath}/{sessionCode}__*` trees. Foundry V14 has no file-delete API: in
+ * that case nothing is browsed beyond the imports root and the session's folders are
+ * reported back so the GM can clear them by hand.
+ * @param {string} sessionCode
+ * @param {string} importsPath
+ * @param {{ exceptDirs?: string[] }} [options]
+ * @returns {Promise<{ dirs: string[], filesDeleted: number, filesSkipped: number, remainingDirs: string[], deleteUnsupported?: boolean }>}
+ */
+export async function purgeSessionAssets(sessionCode, importsPath, { exceptDirs = [] } = {}) {
   const root = normalizeDataPath(importsPath || setting(SETTING_IMPORTS) || DEFAULT_IMPORTS_PATH);
   const result = { dirs: [], filesDeleted: 0, filesSkipped: 0, remainingDirs: [] };
+  const except = new Set(exceptDirs.map((dir) => normalizeDataPath(dir)));
   let browse;
   try {
     browse = await getFilePicker().browse("data", root);
   } catch (_error) {
     return result;
   }
-  const dirs = (browse.dirs ?? []).filter((dir) => isSessionAssetDir(dir, sessionCode));
+  const dirs = (browse.dirs ?? [])
+    .map((dir) => normalizeDataPath(dir))
+    .filter((dir) => isSessionAssetDir(dir, sessionCode) && !except.has(dir));
+  if (typeof getFilePicker().deletePath !== "function") {
+    result.dirs = dirs;
+    result.remainingDirs = [...dirs];
+    result.deleteUnsupported = true;
+    return result;
+  }
   let deleteWorks = true;
 
   async function removeTree(dir) {
@@ -443,6 +561,10 @@ export async function purgeSessionAssets(sessionCode, importsPath) {
 
   for (const dir of dirs) {
     result.dirs.push(dir);
+    if (!deleteWorks) {
+      result.remainingDirs.push(dir);
+      continue;
+    }
     await removeTree(dir);
     try {
       await getFilePicker().browse("data", dir);
@@ -473,6 +595,7 @@ export async function deleteImportedSessions(sessionCodes, options = {}) {
 /** Human-readable summary line for a bulk delete. */
 export function describeDeleteResults(results) {
   const totals = { sessions: 0, scenes: 0, actors: 0, items: 0, journals: 0, keptPcs: 0, remaining: 0 };
+  const remainingDirs = [];
   for (const row of results) {
     if (row.docs) {
       totals.sessions += 1;
@@ -483,15 +606,18 @@ export function describeDeleteResults(results) {
       totals.keptPcs += row.docs.keptPcs;
     }
     totals.remaining += row.assets?.remainingDirs?.length ?? 0;
+    remainingDirs.push(...(row.assets?.remainingDirs ?? []));
   }
   let text =
     `Deleted ${totals.sessions} session(s): ${totals.scenes} scenes, ${totals.actors} actors, ` +
     `${totals.items} items, ${totals.journals} journals.`;
   if (totals.keptPcs) {
-    text += ` Kept ${totals.keptPcs} PC actor(s) (moved to the Actors root).`;
+    text += ` Kept ${totals.keptPcs} PC actor(s) in the Damned Lucky folder.`;
   }
   if (totals.remaining) {
-    text += ` ${totals.remaining} asset folder(s) under Data could not be removed by Foundry — delete them manually.`;
+    text +=
+      ` ${totals.remaining} asset folder(s) under Data could not be removed by Foundry — delete them manually: ` +
+      remainingDirs.map((dir) => `Data/${dir}`).join(", ");
   }
   return text;
 }

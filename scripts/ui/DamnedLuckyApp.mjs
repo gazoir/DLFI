@@ -16,12 +16,13 @@ import {
   listImportedSessions
 } from "../import/sessions.mjs";
 import { ensureDataFolder, pickDataFolder } from "../package/dataFolders.mjs";
-import { ensureInboxRoot, mirrorChosenZipToInbox } from "../package/inbox.mjs";
+import { ensureInboxRoot, ensureSessionInboxFolder } from "../package/inbox.mjs";
 import {
   groupPackagesBySession,
   listInboxCandidates,
   loadPackageFromZipBytes,
   loadPackageFromZipPath,
+  loadPackageSummaryFromZipPath,
   markInboxSessionsNewerThanImported
 } from "../package/readPackage.mjs";
 import { decorateInboxSessionsForDisplay, formatExportStamp } from "./formatExportStamp.mjs";
@@ -162,7 +163,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
           if (candidate.kind !== "zip") {
             continue;
           }
-          const pkg = await loadPackageFromZipPath(candidate.path);
+          const pkg = await loadPackageSummaryFromZipPath(candidate.path);
           loaded.push({ ...candidate, package: pkg });
         } catch (error) {
           console.warn(`${MODULE_ID} | skip ${candidate.path}`, error);
@@ -347,7 +348,10 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
     this.#status = `Importing ${session.displayCode} (${formatExportStamp(exportedAt)})…`;
     this.render();
     try {
-      await importSessionPackage(version.package);
+      const pkg = version.package.partial
+        ? await loadPackageFromZipPath(version.path)
+        : version.package;
+      await importSessionPackage(pkg);
       this.#imported = listImportedSessions();
       this.#status = `Imported ${session.displayCode}.`;
       notify(this.#status);
@@ -376,7 +380,7 @@ export class DamnedLuckyApp extends HandlebarsApplicationMixin(ApplicationV2) {
       try {
         const buffer = await file.arrayBuffer();
         const pkg = loadPackageFromZipBytes(buffer, file.name);
-        await mirrorChosenZipToInbox(file, buffer);
+        await ensureSessionInboxFolder(pkg.manifest);
         await importSessionPackage(pkg);
         this.#imported = listImportedSessions();
         this.#status = `Imported ${pkg.manifest.displayCode} from ${file.name}.`;

@@ -2,6 +2,15 @@
  * Convert package MSD HTML into Foundry single-column journal HTML.
  */
 
+import {
+  decodeHtmlEntities,
+  escapeHtml,
+  escapeRegExp,
+  removeAttributes,
+  sanitizeHtml,
+  stripTags
+} from "../util/html.mjs";
+
 /**
  * @param {string} html
  * @param {{
@@ -16,6 +25,7 @@ export function convertMsdHtmlForFoundry(
   { createdByDlceId = new Map(), uploaded = new Map(), documents = [] } = {}
 ) {
   const source = String(html ?? "");
+  const imageIndex = buildUploadedImageIndex(uploaded);
   let body = extractMsdSingleColumn(source);
   body = stripPrintChrome(body);
   body = promoteMsdHeadingDivs(body);
@@ -24,10 +34,10 @@ export function convertMsdHtmlForFoundry(
   );
   body = rewriteRelatedIdSpans(body, createdByDlceId);
   body = mapAnchoredBlocks(body, (attrs, inner) =>
-    injectPortraitAfterFirstHeading(attrs, inner, { uploaded, documents })
+    injectPortraitAfterFirstHeading(attrs, inner, { uploaded, documents, imageIndex })
   );
-  body = rewriteImageSources(body, uploaded);
-  return body.trim();
+  body = rewriteImageSources(body, uploaded, imageIndex);
+  return sanitizeHtml(body).trim();
 }
 
 /**
@@ -123,10 +133,14 @@ export function stripPrintChrome(html) {
   let next = String(html ?? "");
   // Logo overlay on the title card.
   next = next.replace(/<div\b[^>]*\bdlce-v2-msd-title-logo\b[^>]*>[\s\S]*?<\/div>/gi, "");
-  // Editor / print attributes.
-  next = next.replace(/\s+draggable=(["'])(?:true|false)\1/gi, "");
-  next = next.replace(/\s+hidden(?=[\s>])/gi, "");
-  next = next.replace(/\s+aria-hidden=(["'])(?:true|false)\1/gi, "");
+  // Editor / print attributes (inside tags only — prose like "a hidden door" is kept).
+  next = removeAttributes(
+    next,
+    (name, value) =>
+      name === "hidden" ||
+      (name === "draggable" && /^(true|false)$/i.test(value ?? "")) ||
+      (name === "aria-hidden" && /^(true|false)$/i.test(value ?? ""))
+  );
   // Page footers are print chrome.
   next = next.replace(
     /<footer\b[^>]*\bdlce-v2-msd-page-footer\b[^>]*>[\s\S]*?<\/footer>/gi,
@@ -185,8 +199,8 @@ function linkFirstHeading(attrs, inner, createdByDlceId) {
     return inner;
   }
   const label =
-    attrValue(attrs, "data-msd-label") ||
-    stripTags(inner.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)?.[1] ?? "").trim() ||
+    uuidLinkLabel(attrValue(attrs, "data-msd-label")) ||
+    uuidLinkLabel(inner.match(/<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i)?.[1] ?? "") ||
     dlceId;
 
   let linked = false;
@@ -199,7 +213,11 @@ function linkFirstHeading(attrs, inner, createdByDlceId) {
   });
 }
 
-function injectPortraitAfterFirstHeading(attrs, inner, { uploaded = new Map(), documents = [] } = {}) {
+function injectPortraitAfterFirstHeading(
+  attrs,
+  inner,
+  { uploaded = new Map(), documents = [], imageIndex = buildUploadedImageIndex(uploaded) } = {}
+) {
   const dlceId = firstMsdAnchorId(attrs);
   if (!dlceId || dlceId.startsWith("__")) {
     return inner;
@@ -220,7 +238,10 @@ function injectPortraitAfterFirstHeading(attrs, inner, { uploaded = new Map(), d
   if (!portraitPath) {
     return inner;
   }
-  const worldPath = uploaded.get(portraitPath) || portraitPath;
+  const worldPath = resolveUploadedImageSrc(portraitPath, uploaded, imageIndex);
+  if (!worldPath) {
+    return inner;
+  }
 
   const headingMatch = inner.match(/<h[1-3]\b[^>]*>[\s\S]*?<\/h[1-3]>/i);
   if (!headingMatch || headingMatch.index == null) {
@@ -245,21 +266,47 @@ function injectPortraitAfterFirstHeading(attrs, inner, { uploaded = new Map(), d
  * @returns {string}
  */
 function rewriteRelatedIdSpans(html, createdByDlceId) {
-  return String(html ?? "").replace(
-    /<span\b([^>]*\bdata-msd-related-id=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/span>/gi,
-    (match, _attrs, relatedId, inner) => {
-      const id = String(relatedId || "").trim();
-      if (!id || id.startsWith("__")) {
-        return match;
-      }
-      const uuid = createdByDlceId?.get(id);
-      if (!uuid) {
-        return match;
-      }
-      const label = stripTags(inner).trim() || id;
-      return `@UUID[${uuid}]{${escapeHtml(label)}}`;
+  const source = String(html ?? "");
+  const openRe = /<span\b([^>]*\bdata-msd-related-id=["']([^"']+)["'][^>]*)>/gi;
+  let out = "";
+  let cursor = 0;
+  while (cursor < source.length) {
+    openRe.lastIndex = cursor;
+    const match = openRe.exec(source);
+    if (!match) {
+      out += source.slice(cursor);
+      break;
     }
-  );
+    out += source.slice(cursor, match.index);
+    const afterOpen = match.index + match[0].length;
+    const closeIdx = findMatchingClose(source, "span", afterOpen);
+    if (closeIdx < 0) {
+      out += match[0];
+      cursor = afterOpen;
+      continue;
+    }
+    const closeEnd = closeIdx + source.slice(closeIdx).match(/^<\/span\s*>/i)[0].length;
+    const id = String(match[2] || "").trim();
+    const uuid = id && !id.startsWith("__") ? createdByDlceId?.get(id) : null;
+    if (!uuid) {
+      // Keep the wrapper; still rewrite nested related spans inside it.
+      out += match[0] + rewriteRelatedIdSpans(source.slice(afterOpen, closeIdx), createdByDlceId) + source.slice(closeIdx, closeEnd);
+    } else {
+      const label = uuidLinkLabel(source.slice(afterOpen, closeIdx)) || id;
+      out += `@UUID[${uuid}]{${escapeHtml(label)}}`;
+    }
+    cursor = closeEnd;
+  }
+  return out;
+}
+
+/**
+ * Plain-text label for `@UUID[…]{label}`: tags stripped, entities decoded (escaped
+ * once by the caller), and `[]{}` removed so the link syntax cannot break.
+ * @param {string} html
+ */
+export function uuidLinkLabel(html) {
+  return decodeHtmlEntities(stripTags(html)).replace(/[\[\]{}]/g, "").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -270,14 +317,14 @@ function rewriteRelatedIdSpans(html, createdByDlceId) {
  * @param {Map<string, string>} uploaded
  * @returns {string}
  */
-function rewriteImageSources(html, uploaded) {
+function rewriteImageSources(html, uploaded, imageIndex = buildUploadedImageIndex(uploaded)) {
   if (!uploaded?.size) {
     return html;
   }
   return String(html ?? "").replace(
     /(<img\b[^>]*\bsrc=["'])([^"']+)(["'][^>]*>)/gi,
     (match, prefix, src, suffix) => {
-      const world = resolveUploadedImageSrc(src, uploaded);
+      const world = resolveUploadedImageSrc(decodeHtmlEntities(src), uploaded, imageIndex);
       if (!world) {
         return match;
       }
@@ -287,15 +334,38 @@ function rewriteImageSources(html, uploaded) {
 }
 
 /**
- * Map an MSD/img src onto an uploaded world Data path.
+ * basename → world paths for every uploaded file, built once per conversion.
+ * @param {Map<string, string>} uploaded
+ * @returns {Map<string, string[]>}
+ */
+export function buildUploadedImageIndex(uploaded) {
+  /** @type {Map<string, string[]>} */
+  const index = new Map();
+  for (const [packagePath, worldPath] of uploaded ?? []) {
+    const base = String(packagePath).split("/").pop()?.toLowerCase();
+    if (!base) continue;
+    const list = index.get(base) ?? [];
+    list.push(worldPath);
+    index.set(base, list);
+  }
+  return index;
+}
+
+/**
+ * Map an MSD/img src onto an uploaded world Data path. The basename fallback is
+ * used only when exactly one upload has that filename.
  * @param {string} src
  * @param {Map<string, string>} uploaded
+ * @param {Map<string, string[]>} [imageIndex]
  * @returns {string|null}
  */
-function resolveUploadedImageSrc(src, uploaded) {
+export function resolveUploadedImageSrc(src, uploaded, imageIndex = buildUploadedImageIndex(uploaded)) {
   const raw = String(src || "").trim();
-  if (!raw || raw.startsWith("data:") || /^https?:\/\//i.test(raw)) {
-    return raw.startsWith("data:") || /^https?:\/\//i.test(raw) ? raw : null;
+  if (!raw) {
+    return null;
+  }
+  if (raw.startsWith("data:") || /^https?:\/\//i.test(raw)) {
+    return raw;
   }
   if (uploaded.has(raw)) {
     return uploaded.get(raw);
@@ -304,16 +374,8 @@ function resolveUploadedImageSrc(src, uploaded) {
   if (uploaded.has(key)) {
     return uploaded.get(key);
   }
-  // Basename fallback (e.g. same file under assets/location/ vs portraits/).
-  const base = key.split("/").pop();
-  if (base) {
-    for (const [packagePath, worldPath] of uploaded.entries()) {
-      if (String(packagePath).split("/").pop() === base) {
-        return worldPath;
-      }
-    }
-  }
-  return null;
+  const matches = imageIndex.get(key.split("/").pop()?.toLowerCase() ?? "") ?? [];
+  return matches.length === 1 ? matches[0] : null;
 }
 
 /**
@@ -400,13 +462,6 @@ function stripRoleHeadingAttrs(attrs) {
     .replace(/\s+aria-level=["']\d+["']/gi, "");
 }
 
-function stripTags(value) {
-  return String(value ?? "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function normalizePackagePath(src) {
   let next = String(src ?? "")
     .trim()
@@ -422,14 +477,3 @@ function normalizePackagePath(src) {
   return next.replace(/^\/+/, "");
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}

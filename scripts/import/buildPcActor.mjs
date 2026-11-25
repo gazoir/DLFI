@@ -7,6 +7,7 @@
  * name is kept on `flags.dlfi.fullName`.
  */
 
+import { escapeHtml } from "../util/html.mjs";
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
 import { tokenDisplayHover } from "./tokenArt.mjs";
 
@@ -301,11 +302,11 @@ export async function alertEmptyPcs(info = {}) {
       ? ` Package partyLevel=${Number(info.partyLevel)} (generic party TPL does not create PC Actors).`
       : "";
   const exported = info.exportedAt
-    ? ` Package exportedAt=<code>${escapeHtmlLite(info.exportedAt)}</code>.`
+    ? ` Package exportedAt=<code>${escapeHtml(info.exportedAt)}</code>.`
     : "";
 
   const content =
-    `<p><strong>${escapeHtmlLite(label)}</strong> has <strong>0 seated PCs</strong> in the Session Package.</p>` +
+    `<p><strong>${escapeHtml(label)}</strong> has <strong>0 seated PCs</strong> in the Session Package.</p>` +
     `<p>DLFI created the <strong>Damned Lucky</strong> Actor folder, but left it empty. ` +
     `Landing / battlemap party tokens were also skipped.</p>` +
     `<p>In <strong>DLCE</strong>: open the active Game → seat named Player Characters ` +
@@ -354,11 +355,11 @@ export async function alertPcStubResults(summary = {}) {
 
   const missingList = missing
     .map((row) => {
-      const label = escapeHtmlLite(row.knownAs || row.name || "Unnamed PC");
+      const label = escapeHtml(row.knownAs || row.name || "Unnamed PC");
       const full = row.name && row.knownAs && row.name !== row.knownAs
-        ? ` <span>(${escapeHtmlLite(row.name)})</span>`
+        ? ` <span>(${escapeHtml(row.name)})</span>`
         : "";
-      const id = row.id ? ` <code>${escapeHtmlLite(row.id)}</code>` : "";
+      const id = row.id ? ` <code>${escapeHtml(row.id)}</code>` : "";
       return `<li><strong>${label}</strong>${full}${id}</li>`;
     })
     .join("");
@@ -412,10 +413,3 @@ function stripEmbeddedIds(data) {
   }
 }
 
-function escapeHtmlLite(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}

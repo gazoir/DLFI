@@ -27,12 +27,10 @@ export function resolveSceneBackgroundSrc(scene) {
   if (top) {
     return String(top);
   }
-  const levels = scene.levels;
+  // Foundry EmbeddedCollection is not an Array — prefer .contents.
+  const levels = scene.levels ?? scene._source?.levels;
   const list =
-    levels?.contents ??
-    (Array.isArray(levels) ? levels : levels ? [...levels] : []) ??
-    scene._source?.levels ??
-    [];
+    levels?.contents ?? (Array.isArray(levels) ? levels : levels ? [...levels] : []);
   const initialId = scene.initialLevel ?? scene._source?.initialLevel ?? null;
   if (initialId) {
     const match =

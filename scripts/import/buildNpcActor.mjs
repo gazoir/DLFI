@@ -8,6 +8,7 @@
  * - Attacks: combat_attacks JSON string + combat_actions markdown
  */
 
+import { escapeHtml } from "../util/html.mjs";
 import { FLAG_SCOPE, MODULE_ID, TOKEN_DISPOSITION } from "../constants.mjs";
 import {
   abilityModifier,
@@ -1227,13 +1228,6 @@ function clampInt(value, min, max) {
   return Math.max(min, Math.min(max, Math.round(Number(value))));
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

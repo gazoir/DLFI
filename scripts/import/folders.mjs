@@ -1,15 +1,58 @@
 import { FLAG_SCOPE, PC_ACTOR_FOLDER_NAME, sessionFolderName } from "../constants.mjs";
 
+function isRootFolderOfType(folder, type) {
+  return folder.type === type && !folder.folder;
+}
+
+/**
+ * Find an existing root Folder for DLFI. Identity flags win over the name so a
+ * GM's own same-named folder is never adopted (and later deleted with a session):
+ * - `importKey` → exact import match only;
+ * - `sessionCode` (without importKey) → same session code only;
+ * - `kind` → same kind first, then a same-named folder with no DLFI flags.
+ * @param {string} type
+ * @param {string} name
+ * @param {object} flags
+ * @param {{ excludeIds?: Set<string> }} [options]
+ */
+export function findDlfiRootFolder(type, name, flags = {}, { excludeIds } = {}, folders = game.folders) {
+  const candidates = [...(folders ?? [])].filter(
+    (folder) => isRootFolderOfType(folder, type) && !excludeIds?.has?.(folder.id)
+  );
+  const meta = (folder) => folder.flags?.[FLAG_SCOPE] ?? {};
+  if (flags.importKey) {
+    return candidates.find((folder) => meta(folder).importKey === flags.importKey) ?? null;
+  }
+  if (flags.sessionCode) {
+    return (
+      candidates.find(
+        (folder) => String(meta(folder).sessionCode ?? "") === String(flags.sessionCode)
+      ) ?? null
+    );
+  }
+  if (flags.kind) {
+    const byKind = candidates.find((folder) => meta(folder).kind === flags.kind);
+    if (byKind) {
+      return byKind;
+    }
+    return (
+      candidates.find(
+        (folder) => folder.name === name && !Object.keys(meta(folder)).length
+      ) ?? null
+    );
+  }
+  return candidates.find((folder) => folder.name === name) ?? null;
+}
+
 /**
  * Ensure a root Folder of the given document type exists.
  * @param {string} type Actor|Item|Scene|JournalEntry|RollTable|Playlist|Cards|Adventure
  * @param {string} name
  * @param {object} [flags]
+ * @param {{ excludeIds?: Set<string> }} [options]
  */
-export async function ensureFolder(type, name, flags = {}) {
-  const existing = game.folders.find(
-    (folder) => folder.type === type && folder.name === name && !folder.folder
-  );
+export async function ensureFolder(type, name, flags = {}, options = {}) {
+  const existing = findDlfiRootFolder(type, name, flags, options);
   if (existing) {
     if (Object.keys(flags).length) {
       await existing.update({ flags: { [FLAG_SCOPE]: flags } });
@@ -72,11 +115,14 @@ export async function ensureChildFolder(parent, name, flags = {}) {
 }
 
 /**
- * Create the standard folder set for one imported session.
+ * Create the standard folder set for one imported session. Folders are keyed by
+ * importKey; pass `excludeIds` (the previous import's folders) to force a fresh
+ * set when the same export is re-imported with replace on.
  * @param {object} manifest
  * @param {string} importKey
+ * @param {{ excludeIds?: Set<string> }} [options]
  */
-export async function ensureSessionFolders(manifest, importKey) {
+export async function ensureSessionFolders(manifest, importKey, options = {}) {
   const name = sessionFolderName(manifest);
   const meta = {
     sessionCode: manifest.sessionCode,
@@ -91,7 +137,7 @@ export async function ensureSessionFolders(manifest, importKey) {
   /** @type {Record<string, Folder>} */
   const folders = {};
   for (const type of types) {
-    folders[type] = await ensureFolder(type, name, meta);
+    folders[type] = await ensureFolder(type, name, meta, options);
   }
   return { name, folders, meta };
 }
@@ -111,4 +157,13 @@ export async function setExclusiveSceneNavigation(keepSceneIds) {
   if (updates.length) {
     await Scene.updateDocuments(updates);
   }
+}
+
+/** Session scenes that belong in the nav bar (Leftovers stays GM-only). */
+export function navSceneIdsFor(scenes) {
+  return new Set(
+    [...(scenes ?? [])]
+      .filter((scene) => scene?.flags?.[FLAG_SCOPE]?.kind !== "leftovers")
+      .map((scene) => scene.id)
+  );
 }

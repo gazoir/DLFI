@@ -8,16 +8,24 @@ import { getFilePicker, isNotFoundError } from "./filePicker.mjs";
 /**
  * Ensure a Data/ folder path exists (create parents as needed).
  * @param {string} folderPath e.g. "dlce-inbox" or "dlfi-imports/SESSION_014/…"
+ * @param {{ cache?: Set<string> }} [options] folders already ensured this run (skipped and recorded)
  */
-export async function ensureDataFolder(folderPath) {
+export async function ensureDataFolder(folderPath, { cache } = {}) {
   const normalized = normalizeDataPath(folderPath);
   if (!normalized) {
     return "";
+  }
+  if (cache?.has(normalized)) {
+    return normalized;
   }
   const parts = normalized.split("/").filter(Boolean);
   let current = "";
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
+    if (cache?.has(current)) {
+      continue;
+    }
+    cache?.add(current);
     try {
       await getFilePicker().createDirectory("data", current, { notify: false });
     } catch (error) {
@@ -28,6 +36,7 @@ export async function ensureDataFolder(folderPath) {
       try {
         await getFilePicker().browse("data", current);
       } catch (browseError) {
+        cache?.delete(current);
         console.warn(`${MODULE_ID} | could not ensure folder ${current}`, error, browseError);
         throw error;
       }
@@ -36,11 +45,34 @@ export async function ensureDataFolder(folderPath) {
   return normalized;
 }
 
+/** Data-relative path: forward slashes, no leading/trailing slash. */
 export function normalizeDataPath(path) {
   return String(path ?? "")
     .replace(/\\/g, "/")
     .replace(/^\/+/, "")
     .replace(/\/+$/, "");
+}
+
+/**
+ * True for a relative package path that cannot escape its root: no `..`, `.` or
+ * empty segments, no leading slash, drive letter, or control characters.
+ * @param {string} path
+ */
+export function isSafePackagePath(path) {
+  const raw = String(path ?? "").replace(/\\/g, "/");
+  if (!raw || raw.startsWith("/") || /^[a-z]:/i.test(raw) || /[\u0000-\u001f]/.test(raw)) {
+    return false;
+  }
+  const segments = raw.replace(/\/$/, "").split("/");
+  return segments.every((segment) => segment && segment !== "." && segment !== "..");
+}
+
+/** Encode each segment of a Data-relative path for use in a URL. */
+export function encodeDataPathForUrl(path) {
+  return normalizeDataPath(path)
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 /** Safe single path segment for Data/ folders and filenames. */
@@ -72,10 +104,11 @@ export function packageImportRoot(manifest, sourceLabel = "") {
     .split("/")
     .pop()
     ?.replace(/\.zip$/i, "");
-  if (fromLabel && /__/.test(fromLabel) && fromLabel.includes(String(manifest?.sessionCode ?? ""))) {
-    return safeSegment(fromLabel, fromLabel).replace(/\s+/g, "_");
-  }
   const code = safeSegment(manifest?.sessionCode, "SESSION").replace(/\s+/g, "_");
+  const labelRoot = fromLabel ? safeSegment(fromLabel, fromLabel).replace(/\s+/g, "_") : "";
+  if (labelRoot && labelRoot.toLowerCase().startsWith(`${code}__`.toLowerCase())) {
+    return labelRoot;
+  }
   const slug = safeSegment(manifest?.sessionName, "session")
     .replace(/\s+/g, "_")
     .replace(/[^\w.-]+/g, "");
@@ -163,17 +196,52 @@ export async function deleteDataFile(path) {
 
 /**
  * Upload bytes as a file into a Data/ folder (creates the folder first).
- * @returns {Promise<string|null>} Data-relative path on success
+ * FilePicker.upload reports most failures (size limit, disallowed extension) by
+ * returning false/undefined/{} instead of throwing, so only a result with a path counts.
+ * @param {string} folderPath
+ * @param {string} fileName
+ * @param {Uint8Array|Blob} bytes
+ * @param {{ contentType?: string, cache?: Set<string> }} [options]
+ * @returns {Promise<string|null>} Data-relative path on success, null on failure
  */
-export async function uploadDataFile(folderPath, fileName, bytes, { contentType } = {}) {
-  const folder = await ensureDataFolder(folderPath);
+export async function uploadDataFile(folderPath, fileName, bytes, { contentType, cache } = {}) {
+  const folder = await ensureDataFolder(folderPath, { cache });
   const name = String(fileName || "file.bin").replace(/[\\/]+/g, "_");
   const blob = bytes instanceof Blob ? bytes : new Blob([bytes], { type: contentType || "application/octet-stream" });
   const file = new File([blob], name, { type: blob.type || contentType || "application/octet-stream" });
-  try {
-    await getFilePicker().upload("data", folder, file, {}, { notify: false });
-  } catch (_error) {
-    await getFilePicker().upload("data", folder, file, { notify: false });
+  const result = await getFilePicker().upload("data", folder, file, {}, { notify: false });
+  if (!result?.path) {
+    return null;
   }
-  return folder ? `${folder}/${name}` : name;
+  return normalizeDataPath(decodeURIComponentSafe(result.path));
+}
+
+function decodeURIComponentSafe(value) {
+  try {
+    return decodeURIComponent(String(value));
+  } catch (_error) {
+    return String(value);
+  }
+}
+
+/**
+ * Run async jobs with at most `limit` in flight; results keep input order.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T, index: number) => Promise<R>} worker
+ * @returns {Promise<R[]>}
+ */
+export async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  const lanes = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(lanes);
+  return results;
 }

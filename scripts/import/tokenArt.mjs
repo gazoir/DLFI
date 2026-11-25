@@ -10,6 +10,8 @@
  * `assets/{npc,npcs}/tokens/` (two or more).
  */
 
+import { normalizeDataPath } from "../package/dataFolders.mjs";
+
 /** Foundry CONST.TOKEN_DISPLAY_MODES.HOVER — "Hovered by Anyone". */
 export const TOKEN_DISPLAY_HOVER = 30;
 /** Foundry CONST.TOKEN_DISPLAY_MODES.ALWAYS — "Always Displayed". */
@@ -45,9 +47,7 @@ export function isWildcardPath(path) {
 }
 
 function normalizePath(path) {
-  return String(path ?? "")
-    .replace(/\\/g, "/")
-    .replace(/^\/+/, "");
+  return normalizeDataPath(path);
 }
 
 function escapeRegex(value) {

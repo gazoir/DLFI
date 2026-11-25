@@ -15,6 +15,7 @@
  *   right-aligned to the map edge), matching Expo Scene Template Item 1–5
  */
 
+import { escapeHtml } from "../util/html.mjs";
 import {
   FLAG_SCOPE,
   ITEM_PILES_FOLDER_NAME,
@@ -237,8 +238,9 @@ export function buildItemPileTokenData({
 }
 
 /**
- * Template Item 1–N placeholders or any Item Piles–flagged token to clear
- * before placing DLFI piles (world Expo template keeps Item 1–5).
+ * Template Item 1–N placeholders or DLFI-placed pile tokens to clear before
+ * placing DLFI piles (world Expo template keeps Item 1–5). Item Piles tokens the
+ * GM placed (merchants, containers) are not DLFI's and are left alone.
  * @param {object} token
  * @returns {boolean}
  */
@@ -247,12 +249,19 @@ export function isLocationItemPilePlaceholderToken(token) {
   if (ITEM_PILE_PLACEHOLDER_NAME_RE.test(name)) {
     return true;
   }
-  const flags = token?.flags ?? {};
-  if (flags[ITEM_PILES_FLAG_SCOPE] || flags.itempiles) {
-    return true;
-  }
-  const kind = flags[FLAG_SCOPE]?.kind;
-  return kind === "item-pile" || Boolean(flags[FLAG_SCOPE]?.itemPile);
+  const dlfi = token?.flags?.[FLAG_SCOPE];
+  return dlfi?.kind === "item-pile" || Boolean(dlfi?.itemPile);
+}
+
+/**
+ * True only for pile Actors DLFI created (flags.dlfi.kind === "item-pile").
+ * Use this before deleting anything; {@link isDlfiItemPileActor} is broader.
+ * @param {Actor|object|null|undefined} actor
+ * @returns {boolean}
+ */
+export function isDlfiCreatedPileActor(actor) {
+  const dlfi = actor?.flags?.[FLAG_SCOPE];
+  return dlfi?.kind === "item-pile" || Boolean(dlfi?.itemPile);
 }
 
 /**
@@ -340,15 +349,15 @@ export async function alertItemPilesMissing({ scene = null, items = [] } = {}) {
     ? `<ul>${rows
         .map(
           (row) =>
-            `<li><code>${escapeHtmlLite(row.name)}</code>` +
-            (row.dlceId ? ` <span>(${escapeHtmlLite(row.dlceId)})</span>` : "") +
+            `<li><code>${escapeHtml(row.name)}</code>` +
+            (row.dlceId ? ` <span>(${escapeHtml(row.dlceId)})</span>` : "") +
             `</li>`
         )
         .join("")}</ul>`
     : "<p><em>No items listed.</em></p>";
   const content =
     `<p>The <strong>Item Piles</strong> module (<code>${ITEM_PILES_MODULE_ID}</code>) ` +
-    `is not active. DLFI will not place item piles on <strong>${escapeHtmlLite(sceneName)}</strong>.</p>` +
+    `is not active. DLFI will not place item piles on <strong>${escapeHtml(sceneName)}</strong>.</p>` +
     `<p>Enable Item Piles and re-import the session to place these items:</p>${listHtml}`;
 
   const DialogV2 = globalThis.foundry?.applications?.api?.DialogV2;
@@ -373,13 +382,6 @@ export async function alertItemPilesMissing({ scene = null, items = [] } = {}) {
   console.warn(`${MODULE_ID} | ${content.replace(/<[^>]+>/g, " ")}`);
 }
 
-function escapeHtmlLite(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 /**
  * True when an Actor is a DLFI / Item Piles loot pile (never a seated PC).
@@ -417,8 +419,9 @@ export function tokenActorId(token) {
 }
 
 /**
- * Remove Expo "Item 1…N" placeholders and prior DLFI / Item Piles tokens,
- * and delete the world Actors those piles pointed at (tokens alone leave orphans).
+ * Remove Expo "Item 1…N" placeholders and prior DLFI pile tokens, and delete the
+ * world Actors behind DLFI-created piles (tokens alone leave orphans). Actors
+ * DLFI did not create — template placeholders, GM merchants — are never deleted.
  * @param {Scene} scene
  * @returns {Promise<number>} deleted token count
  */
@@ -438,7 +441,7 @@ export async function clearLocationItemPileTokens(scene) {
       continue;
     }
     const actor = globalThis.game?.actors?.get?.(actorId) ?? null;
-    if (!actor || isDlfiItemPileActor(actor) || isLocationItemPilePlaceholderToken(token)) {
+    if (actor && isDlfiCreatedPileActor(actor)) {
       actorIds.add(actorId);
     }
   }

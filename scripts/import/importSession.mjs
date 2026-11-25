@@ -16,6 +16,7 @@ import {
   SETTING_TEMPLATE_LOCATION,
   SETTING_TEMPLATE_OUTRO
 } from "../constants.mjs";
+import { escapeHtml } from "../util/html.mjs";
 import { buildNpcNpcActorData } from "./buildNpcActor.mjs";
 import { buildItemCreateData } from "./buildItemData.mjs";
 import {
@@ -1240,10 +1241,3 @@ function matchExistingPcActor(pc) {
   return actors.find((actor) => String(actor.name || "").trim().toLowerCase() === name) ?? null;
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}

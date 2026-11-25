@@ -10,12 +10,12 @@
   <div class="dlfi-panel">
     <div class="dlfi-toolbar">
       <button type="button" data-action="refreshInbox" {{#if busy}}disabled{{/if}}>Refresh inbox</button>
-      <button type="button" data-action="chooseZip" {{#if busy}}disabled{{/if}}>Choose zip…</button>
+      <button type="button" data-action="chooseZip" title="Import a zip from this computer without copying it into the inbox" {{#if busy}}disabled{{/if}}>Import zip from disk…</button>
     </div>
     {{#if status}}<p class="dlfi-status">{{status}}</p>{{/if}}
 
     {{#unless sessions.length}}
-      <p class="notes">No Session Package zips found. Export from DLCE, drop the zip into the inbox (or Choose zip…), then Refresh. The inbox folder is created automatically if missing.</p>
+      <p class="notes">No Session Package zips found. Export from DLCE, drop the zip into the inbox, then Refresh (or use Import zip from disk…, which imports without storing the zip). The inbox folder is created automatically if missing.</p>
     {{/unless}}
 
     <ol class="dlfi-session-list">

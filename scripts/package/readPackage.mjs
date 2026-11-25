@@ -1,7 +1,15 @@
 import { MODULE_ID, PACKAGE_FORMAT_VERSIONS, notify } from "../constants.mjs";
 import { resolveSessionThumbPackagePath } from "../import/resolveLandingArt.mjs";
+import { encodeDataPathForUrl, isSafePackagePath, normalizeDataPath } from "./dataFolders.mjs";
 import { getFilePicker } from "./filePicker.mjs";
-import { normalizePackageFiles, readStoreZip } from "./storeZip.mjs";
+import {
+  entryDataFromLocal,
+  findEndOfCentralDirectory,
+  normalizePackageFiles,
+  parseCentralDirectory,
+  readStoreZip,
+  ZIP_TAIL_MAX
+} from "./storeZip.mjs";
 
 /**
  * @typedef {object} LoadedPackage
@@ -48,14 +56,17 @@ export function loadPackageFromZipBytes(buffer, sourceLabel = "zip") {
   return { sourceLabel, manifest, files };
 }
 
+function dataFileUrl(dataPath) {
+  return foundry.utils.getRoute(`/${encodeDataPathForUrl(dataPath)}`);
+}
+
 /**
  * Fetch a FilePicker data path as ArrayBuffer.
  * @param {string} dataPath path relative to Data/
  */
 export async function fetchDataFile(dataPath) {
-  const normalized = dataPath.replace(/^\/+/, "");
-  const url = foundry.utils.getRoute(`/${normalized}`);
-  const response = await fetch(url, { method: "GET", cache: "no-cache" });
+  const normalized = normalizeDataPath(dataPath);
+  const response = await fetch(dataFileUrl(normalized), { method: "GET", cache: "no-cache" });
   if (!response.ok) {
     throw new Error(`Could not read ${normalized} (${response.status})`);
   }
@@ -63,11 +74,122 @@ export async function fetchDataFile(dataPath) {
 }
 
 /**
+ * Fetch a byte range. `partial` is false when the server ignored Range and sent the whole file.
+ * @param {string} url
+ * @param {string} range e.g. "bytes=-65557" or "bytes=100-199"
+ */
+async function fetchRange(url, range) {
+  const response = await fetch(url, { method: "GET", cache: "no-cache", headers: { Range: range } });
+  if (!response.ok) {
+    throw new Error(`Could not read ${url} (${response.status})`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const partial = response.status === 206;
+  const total = partial
+    ? Number(String(response.headers.get("Content-Range") ?? "").split("/").pop()) || null
+    : bytes.length;
+  return { bytes, partial, total };
+}
+
+/** @type {Map<string, { size: number|null, modified: string, summary: LoadedPackage }>} */
+const inboxSummaryCache = new Map();
+
+/**
+ * Manifest + session thumbnail only, read with HTTP Range requests (central directory,
+ * then the two entries). Cached by path, size and Last-Modified. Falls back to a full
+ * load when the server does not honour Range. Use {@link loadPackageFromZipPath} to import.
+ * @param {string} zipPath Data-relative
+ * @returns {Promise<LoadedPackage & { partial: boolean, path: string }>}
+ */
+export async function loadPackageSummaryFromZipPath(zipPath) {
+  const path = normalizeDataPath(zipPath);
+  const url = dataFileUrl(path);
+  let size = null;
+  let modified = "";
+  try {
+    const head = await fetch(url, { method: "HEAD", cache: "no-cache" });
+    if (head.ok) {
+      size = Number(head.headers.get("Content-Length")) || null;
+      modified = head.headers.get("Last-Modified") ?? "";
+    }
+  } catch (_error) {
+    /* HEAD unsupported: no cache check */
+  }
+  const cached = inboxSummaryCache.get(path);
+  if (cached && size != null && cached.size === size && cached.modified === modified) {
+    return cached.summary;
+  }
+
+  const tail = await fetchRange(url, `bytes=-${ZIP_TAIL_MAX}`);
+  let summary;
+  if (!tail.partial) {
+    summary = { ...loadPackageFromZipBytes(tail.bytes, path), partial: false, path };
+  } else {
+    summary = await summaryFromRanges(url, path, tail);
+  }
+  inboxSummaryCache.set(path, { size: size ?? tail.total, modified, summary });
+  return summary;
+}
+
+async function summaryFromRanges(url, path, tail) {
+  const eocd = findEndOfCentralDirectory(tail.bytes);
+  if (!eocd || tail.total == null) {
+    throw new Error(`No ZIP central directory in ${path}`);
+  }
+  const tailStart = tail.total - tail.bytes.length;
+  const cdBytes =
+    eocd.cdOffset >= tailStart
+      ? tail.bytes.subarray(eocd.cdOffset - tailStart, eocd.cdOffset - tailStart + eocd.cdSize)
+      : (await fetchRange(url, `bytes=${eocd.cdOffset}-${eocd.cdOffset + eocd.cdSize - 1}`)).bytes;
+  /** @type {Map<string, ReturnType<typeof parseCentralDirectory>[number]>} */
+  const byName = new Map();
+  for (const entry of parseCentralDirectory(cdBytes)) {
+    if (entry.name && !entry.name.endsWith("/") && isSafePackagePath(entry.name) && entry.method === 0) {
+      byName.set(entry.name, entry);
+    }
+  }
+  const { root, files: entries } = normalizePackageFiles(byName);
+
+  const readEntry = async (entry) => {
+    const slack = 30 + entry.nameLen + entry.extraLen + 256;
+    let local = (await fetchRange(url, `bytes=${entry.localOffset}-${entry.localOffset + slack + entry.compSize - 1}`)).bytes;
+    let data = entryDataFromLocal(local, entry);
+    if (!data) {
+      local = (await fetchRange(url, `bytes=${entry.localOffset}-${entry.localOffset + 30 + 0x1ffff + entry.compSize}`)).bytes;
+      data = entryDataFromLocal(local, entry);
+    }
+    if (!data) {
+      throw new Error(`Could not read ${entry.name} from ${path}`);
+    }
+    return data;
+  };
+
+  const manifestEntry = entries.get("manifest.json");
+  if (!manifestEntry) {
+    throw new Error(`No manifest.json in ${path}${root ? ` (root ${root})` : ""}`);
+  }
+  const manifest = validateManifest(decodeJson(await readEntry(manifestEntry)));
+  /** @type {Map<string, Uint8Array|null>} */
+  const files = new Map([...entries.keys()].map((key) => [key, null]));
+  files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest)));
+  const thumbPath = resolveSessionThumbPackagePath(manifest, files);
+  const thumbEntry = thumbPath ? entries.get(thumbPath) : null;
+  if (thumbEntry) {
+    try {
+      files.set(thumbPath, await readEntry(thumbEntry));
+    } catch (error) {
+      console.warn(`${MODULE_ID} | inbox thumbnail read failed for ${path}`, error);
+    }
+  }
+  return { sourceLabel: path, manifest, files, partial: true, path };
+}
+
+/**
  * Browse a Data/ folder via FilePicker.
  * @param {string} dataPath
  */
 export async function browseDataFolder(dataPath) {
-  const normalized = dataPath.replace(/^\/+|\/+$/g, "") || "";
+  const normalized = normalizeDataPath(dataPath);
   return getFilePicker().browse("data", normalized);
 }
 

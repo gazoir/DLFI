@@ -14,7 +14,7 @@ import {
   normalizeDataPath,
   sessionInboxFolderName
 } from "./dataFolders.mjs";
-import { browseDataFolder, loadPackageFromZipBytes } from "./readPackage.mjs";
+import { browseDataFolder } from "./readPackage.mjs";
 
 /**
  * Ensure the configured inbox root exists.
@@ -66,24 +66,21 @@ export async function listInboxZipCandidates(inboxPath = setting(SETTING_INBOX))
 }
 
 /**
- * Store a zip into `inbox/{Session Code · Name}/` and prune to the newest N copies.
- *
- * Foundry's FilePicker.upload rejects `.zip` (not in the allowed media extensions).
- * We therefore do not upload via FilePicker — drop zips into Data/dlce-inbox via the OS,
- * or use Choose zip… which imports from memory without mirroring.
- *
- * @param {File|Blob} _file
+ * Create `inbox/{Session Code · Name}/` for a session. Foundry's FilePicker.upload
+ * rejects `.zip`, so a zip chosen with "Choose zip…" is imported from memory and not
+ * copied here; drop zips into this folder via the OS to keep them in the inbox.
  * @param {object} manifest
- * @returns {Promise<string|null>}
+ * @returns {Promise<string>} the session inbox folder (Data-relative)
  */
-export async function storeZipInSessionInbox(_file, manifest) {
+export async function ensureSessionInboxFolder(manifest) {
   const inbox = await ensureInboxRoot();
-  const sessionFolder = sessionInboxFolderName(manifest);
-  await ensureDataFolder(`${inbox}/${sessionFolder}`);
-  console.warn(
-    `${MODULE_ID} | Foundry disallows uploading .zip via FilePicker. Place zips in Data/${inbox}/${sessionFolder}/ via the OS file system.`
-  );
-  return null;
+  const folder = `${inbox}/${sessionInboxFolderName(manifest)}`;
+  try {
+    await ensureDataFolder(folder);
+  } catch (error) {
+    console.warn(`${MODULE_ID} | could not prepare inbox folder ${folder}`, error);
+  }
+  return folder;
 }
 
 /**
@@ -107,20 +104,5 @@ export async function pruneSessionInboxFolder(folderPath, keep = INBOX_KEEP_PER_
   for (const path of excess) {
     const deleted = await deleteDataFile(path);
     console.log(`${MODULE_ID} | inbox prune ${deleted ? "deleted" : "left"} ${path}`);
-  }
-}
-
-/**
- * After a local Choose zip…, ensure the session inbox folder exists.
- * Foundry cannot upload .zip through FilePicker — import still proceeds from memory.
- */
-export async function mirrorChosenZipToInbox(file, packageBytes) {
-  try {
-    const pkg = loadPackageFromZipBytes(packageBytes, file.name);
-    await storeZipInSessionInbox(file, pkg.manifest);
-    return null;
-  } catch (error) {
-    console.warn(`${MODULE_ID} | could not prepare inbox folder for chosen zip`, error);
-    return null;
   }
 }

@@ -2261,7 +2261,16 @@ for (const path of paths) {
     };
     const assets = await sessions.purgeSessionAssets("SESSION_099", "dlfi-imports");
     assert(assets.filesDeleted === 0, "V14 purge deletes nothing without deletePath");
-    assert(assets.filesSkipped === 3, "V14 purge skips remaining files after first failure");
+    assert(
+      assets.deleteUnsupported === true &&
+        assets.filesSkipped === 0 &&
+        assets.remainingDirs.join(",") === "dlfi-imports/SESSION_099__Name__a",
+      "V14 purge returns early and reports leftover folders"
+    );
+    assert(
+      sessions.describeDeleteResults([{ docs: null, assets }]).includes("Data/dlfi-imports/SESSION_099__Name__a"),
+      "delete summary names leftover asset folders"
+    );
     assert(purgeFetchCalls === 0, "V14 purge does not call /filesystem");
     globalThis.fetch = prevFetch;
   }
@@ -2292,11 +2301,18 @@ for (const path of paths) {
     "Item 3 token is cleared as placeholder"
   );
   assert(
-    isLocationItemPilePlaceholderToken({
-      name: "Bag",
-      flags: { "item-piles": { data: { type: "pile" } } }
+    !isLocationItemPilePlaceholderToken({
+      name: "Merchant",
+      flags: { "item-piles": { data: { type: "merchant" } } }
     }),
-    "item-piles flagged token is cleared"
+    "GM-placed Item Piles token (no DLFI flag) is kept"
+  );
+  assert(
+    isLocationItemPilePlaceholderToken({
+      name: "Sentinel Shield",
+      flags: { dlfi: { kind: "item-pile" }, "item-piles": { data: { type: "pile" } } }
+    }),
+    "DLFI pile token is cleared"
   );
   assert(
     !isLocationItemPilePlaceholderToken({ name: "1A1", flags: {} }),

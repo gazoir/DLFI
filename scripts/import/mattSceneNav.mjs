@@ -11,6 +11,7 @@
  */
 
 import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { resolveSceneBackgroundSrc } from "./applySceneBackground.mjs";
 import { sceneCanvasMetrics } from "./scenePlacement.mjs";
 
 export const MONKS_ACTIVE_TILES_ID = "monks-active-tiles";
@@ -215,40 +216,8 @@ export function buildMattSceneAction(scene) {
   };
 }
 
-/**
- * Best-effort scene background / art path for a nav thumb.
- * @param {Scene|object|null} scene
- * @returns {string|null}
- */
-export function sceneArtSrc(scene) {
-  if (!scene) {
-    return null;
-  }
-  const top = scene.background?.src || scene.img || null;
-  if (top) {
-    return String(top);
-  }
-  // Foundry EmbeddedCollection is not an Array — prefer .contents.
-  const levels = scene.levels ?? scene._source?.levels;
-  const list =
-    levels?.contents ?? (Array.isArray(levels) ? levels : levels ? [...levels] : []);
-  const initialId = scene.initialLevel ?? scene._source?.initialLevel ?? null;
-  if (initialId) {
-    const match =
-      levels?.get?.(initialId) ||
-      list.find((level) => (level?.id ?? level?._id) === initialId);
-    if (match?.background?.src) {
-      return String(match.background.src);
-    }
-  }
-  for (const level of list) {
-    const src = level?.background?.src;
-    if (src) {
-      return String(src);
-    }
-  }
-  return null;
-}
+/** Best-effort scene background / art path for a nav thumb. */
+export const sceneArtSrc = resolveSceneBackgroundSrc;
 
 /**
  * Read tile scene geometry. Prefer `toObject()` / `_source` so we never pick up
