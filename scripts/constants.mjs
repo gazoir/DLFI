@@ -64,9 +64,12 @@ export function setSetting(key, value) {
 
 export function notify(message, { permanent = false, type = "info" } = {}) {
   const text = String(message ?? "");
-  const level = type === "error" ? "error" : type === "warning" ? "warn" : "log";
+  // Foundry Notifications has info / warn / error (no "warning").
+  const kind = type === "warning" ? "warn" : type;
+  const level = kind === "error" ? "error" : kind === "warn" ? "warn" : "log";
   console[level](`${MODULE_ID} | ${text}`);
-  ui.notifications[type]?.(text, { permanent }) ?? ui.notifications.info(text);
+  const show = typeof ui.notifications[kind] === "function" ? ui.notifications[kind] : ui.notifications.info;
+  show.call(ui.notifications, text, { permanent });
 }
 
 export function sessionFolderName(manifest) {

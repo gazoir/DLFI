@@ -2831,6 +2831,83 @@ for (const path of paths) {
   assert(users.find((u) => u.id === "u_player")?.name === "Sam", "unlock strips _");
 }
 
+{
+  const {
+    findUserForSeat,
+    softSeatPlayers,
+    lockPlayersLogin,
+    listManageableUsers,
+    updateManagedUser,
+    USER_ROLE
+  } = await import("./softSeatPlayers.mjs");
+  const mk = (id, name, role, flags = {}, extra = {}) => ({
+    id,
+    name,
+    role,
+    isGM: role >= USER_ROLE.GAMEMASTER,
+    character: null,
+    flags,
+    async update(patch) {
+      Object.assign(this, patch);
+    },
+    ...extra
+  });
+  const trusted = mk("u_tr", "Robin", USER_ROLE.TRUSTED, { dlfi: { playerId: "p_robin" } });
+  const gm = mk("u_gm", "Gamemaster", USER_ROLE.GAMEMASTER);
+  const other = mk("u_other", "Kim", USER_ROLE.PLAYER, { dlfi: { playerId: "p_kim_a" } });
+  const users = [trusted, gm, other];
+  users.get = (id) => users.find((u) => u.id === id);
+
+  assert(findUserForSeat(users, { playerName: "Gamemaster" }) == null, "name match skips GM");
+  assert(findUserForSeat(users, { playerName: "Robin" }) == null, "name match skips Trusted");
+  assert(findUserForSeat(users, { playerId: "p_kim_b", playerName: "Kim" }) == null, "name match skips other playerId");
+  assert(findUserForSeat(users, { playerId: "p_robin" })?.id === "u_tr", "playerId still finds Trusted");
+
+  const actor = {
+    id: "a_robin",
+    ownership: {},
+    async update(patch) {
+      Object.assign(this, patch);
+    }
+  };
+  let created = 0;
+  const FakeUser = {
+    async create() {
+      created += 1;
+      return mk("u_dup", "dup", USER_ROLE.NONE);
+    }
+  };
+  await softSeatPlayers([{ actor, playerId: "p_robin", playerName: "Robin" }], {
+    world: { users },
+    UserDocument: FakeUser
+  });
+  assert(trusted.role === USER_ROLE.TRUSTED && trusted.name === "Robin", "soft-seat leaves Trusted role/name");
+  assert(!trusted.flags.dlfi.managed, "soft-seat does not mark Trusted managed");
+  assert(trusted.character === "a_robin" && actor.ownership.u_tr === 3, "Trusted still gets their PC");
+  await softSeatPlayers([{ actor, playerId: "p_kim_b", playerName: "Kim" }], { world: { users }, UserDocument: FakeUser });
+  assert(created === 0, "no duplicate-name user created when the name is taken");
+
+  const listed = listManageableUsers({ users }).map((u) => u.id);
+  assert(!listed.includes("u_tr") && !listed.includes("u_gm"), "Players UI hides Trusted / GM");
+  let threw = false;
+  try {
+    await updateManagedUser("u_tr", { playable: false }, { world: { users, actors: [] } });
+  } catch (_error) {
+    threw = true;
+  }
+  assert(threw && trusted.role === USER_ROLE.TRUSTED, "updateManagedUser refuses Trusted");
+
+  const broken = mk("u_broken", "Lee", USER_ROLE.PLAYER, {}, {
+    async update() {
+      throw new Error("rename clash");
+    }
+  });
+  const lockUsers = [broken, mk("u_ok", "Pat", USER_ROLE.PLAYER)];
+  const lockResult = await lockPlayersLogin({ world: { users: lockUsers } });
+  assert(lockResult.failed.length === 1 && lockResult.locked.length === 1, "lock continues past a failed user");
+  assert(lockUsers[1].role === USER_ROLE.NONE, "other users still locked");
+}
+
 if (failures) {
   console.error(`\n${failures} assertion(s) failed`);
   process.exit(1);
