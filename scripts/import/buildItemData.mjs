@@ -30,7 +30,7 @@ export function resolveItemGpValue(fields = {}) {
     return null;
   }
   if (typeof raw === "number" && Number.isFinite(raw)) {
-    return Math.max(0, Math.round(raw));
+    return roundGp(raw);
   }
   const text = String(raw).trim();
   if (!text) {
@@ -42,7 +42,38 @@ export function resolveItemGpValue(fields = {}) {
   if (!Number.isFinite(n)) {
     return null;
   }
-  return Math.max(0, Math.round(n));
+  return roundGp(n);
+}
+
+/** Keep fractional gp (0.5 gp = 5 sp) to copper precision. */
+function roundGp(value) {
+  return Math.max(0, Math.round(value * 100) / 100);
+}
+
+/** Fallback when CONFIG.DND5E is unavailable (node selftests). */
+const DND5E_RARITY_KEYS = ["common", "uncommon", "rare", "veryRare", "legendary", "artifact"];
+
+/**
+ * dnd5e rarity key for a free-text rarity ("Very Rare", "very_rare" → "veryRare").
+ * @param {unknown} value
+ * @returns {string|null}
+ */
+export function mapItemRarity(value) {
+  const squash = (text) => String(text ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  const wanted = squash(value);
+  if (!wanted) {
+    return null;
+  }
+  const config = globalThis.CONFIG?.DND5E?.itemRarity;
+  const keys = config ? Object.keys(config) : DND5E_RARITY_KEYS;
+  for (const key of keys) {
+    const label = config?.[key];
+    const labelText = typeof label === "string" ? label : label?.label;
+    if (squash(key) === wanted || (labelText && squash(globalThis.game?.i18n?.localize?.(labelText) ?? labelText) === wanted)) {
+      return key;
+    }
+  }
+  return null;
 }
 
 /**
@@ -58,23 +89,8 @@ export function buildItemPrice(fields = {}) {
   return { value: gp, denomination: "gp" };
 }
 
-/**
- * Map DLCE item subtype → Foundry dnd5e item type.
- * @param {string|null|undefined} subtype
- * @param {object|null|undefined} fields
- * @returns {string}
- */
-export function mapItemType(subtype, fields = {}) {
-  void fields;
-  // All DLCE item subtypes currently import as loot piles / treasure cards.
-  if (subtype === "magic" || subtype === "plot") {
-    return "loot";
-  }
-  if (subtype === "cash_loot" || subtype === "gold_pieces") {
-    return "loot";
-  }
-  return "loot";
-}
+/** Every DLCE item subtype imports as a dnd5e `loot` Item (treasure card / pile content). */
+export const DLCE_ITEM_TYPE = "loot";
 
 /**
  * @param {{
@@ -98,7 +114,7 @@ export function buildItemCreateData(opts) {
       )
     }
   };
-  const rarity = String(fields.rarity || "").toLowerCase();
+  const rarity = mapItemRarity(fields.rarity);
   if (rarity) {
     system.rarity = rarity;
   }
@@ -108,7 +124,7 @@ export function buildItemCreateData(opts) {
 
   return {
     name: entry.name,
-    type: mapItemType(subtype, fields),
+    type: DLCE_ITEM_TYPE,
     img: opts.portraitWorldPath || undefined,
     folder: opts.folderId ?? null,
     system,

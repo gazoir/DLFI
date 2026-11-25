@@ -515,6 +515,70 @@ for (const path of paths) {
   assert(epergne.system.price?.value === 393, "epergne price.value 393");
   assert(epergne.system.price?.denomination === "gp", "epergne denomination gp");
   assert(epergne.flags.dlfi.gpValue === 393, "flag mirrors gp");
+
+  const { mapItemRarity } = await import("./buildItemData.mjs");
+  assert(resolveItemGpValue({ gp_value: "0.5" }) === 0.5, "gp keeps fractional value");
+  assert(resolveItemGpValue({ gp_value: "12.345" }) === 12.35, "gp rounds to 0.01");
+  assert(mapItemRarity("Very Rare") === "veryRare", "rarity Very Rare → veryRare");
+  assert(mapItemRarity("very_rare") === "veryRare", "rarity very_rare → veryRare");
+  assert(mapItemRarity("nonsense") === null, "unknown rarity → null");
+  const ring = buildItemCreateData({
+    entry: { id: "item_ring", name: "Ring", subtype: "magic_item" },
+    fields: { rarity: "Uncommon", gp_value: "0.5" },
+    importKey: "SESSION_014_test"
+  });
+  assert(ring.system.rarity === "uncommon", "item create data carries rarity");
+  assert(ring.system.price?.value === 0.5, "item create data keeps 0.5 gp");
+}
+
+{
+  const { buildItemsFromFields, parseRechargeFromNameOrBody, parseDamagePartsFromText } =
+    await import("./buildNpcActor.mjs");
+  const [claw] = buildItemsFromFields({
+    combat_level: "20",
+    combat_str: "16",
+    combat_dex: "10",
+    combat_attacks: JSON.stringify([{ name: "Claw", bonus: "+6", damage: [{ dice: "1d8 + 3", type: "slashing" }] }])
+  });
+  assert(claw.flags.dlfi.predictedAttackBonus === 6, "weapon prof uses combat_level CR (level 20 → +3)");
+  assert(Object.values(claw.system.activities)[0].attack.bonus === "", "no residual to-hit bonus");
+
+  const breath = parseRechargeFromNameOrBody("Fire Breath (Recharge 5–6)", "Cone.");
+  assert(breath.itemUses.max === "1" && breath.itemUses.recovery[0].formula === "5", "recharge 5–6 → item uses, formula 5");
+  assert(breath.uses.max === "" && !breath.uses.recovery.length, "recharge: activity has no own uses");
+  assert(breath.consumptionTargets[0]?.type === "itemUses", "recharge: activity consumes item uses");
+  const rally = parseRechargeFromNameOrBody("Rally", "Recharges after a short rest.");
+  assert(rally.itemUses.recovery[0]?.period === "sr", "short rest recovery");
+  const lr = parseRechargeFromNameOrBody("Roar", "Recharges after a long rest.");
+  assert(lr.itemUses.recovery[0]?.period === "lr", "long rest recovery");
+  assert(!parseRechargeFromNameOrBody("Bite", "Hits.").consumptionTargets.length, "unlimited action: no consumption");
+
+  const parts = parseDamagePartsFromText(
+    "DC 13 Dexterity saving throw, taking 22 (5d8) fire damage and 7 (2d6) poison damage on a failed save, or half as much on a success."
+  );
+  assert(parts.length === 2 && parts[0].number === 5 && parts[0].types[0] === "fire", "save damage part 5d8 fire");
+  assert(parts[1].types[0] === "poison", "second save damage part poison");
+  const [breathFeat] = buildItemsFromFields({
+    combat_actions:
+      "**Fire Breath (Recharge 5–6).** Each creature in a 15-foot cone must make a DC 13 Dexterity saving throw, taking 22 (5d8) fire damage on a failed save, or half as much on a success."
+  });
+  const saveActivity = Object.values(breathFeat.system.activities)[0];
+  assert(saveActivity.type === "save" && saveActivity.damage.parts.length === 1, "save activity gets damage parts");
+  assert(saveActivity.damage.onSave === "half", "save activity half on save");
+  assert(breathFeat.system.uses.max === "1", "breath item uses max 1");
+
+  const multi = parseWeaponBaseDamage("2d6 + 1d4 + 3", { abilityMod: 3 });
+  assert(multi.custom.enabled && multi.custom.formula === "2d6 + 1d4", "custom formula strips ability mod");
+  const multiPred = predictFoundryBaseDamage(multi, { abilityMod: 3, dlceFormula: "2d6 + 1d4 + 3" });
+  assert(multiPred.matchesDlce && multiPred.formula === "2d6 + 1d4 + @mod", "custom formula prediction matches");
+  const noConst = parseWeaponBaseDamage("2d6 + 1d4", { abilityMod: 2 });
+  assert(noConst.custom.formula === "2d6 + 1d4 - 2", "custom formula without constant offsets @mod");
+  const weird = parseWeaponBaseDamage("2d6 + @prof", { abilityMod: 2 });
+  assert(
+    !predictFoundryBaseDamage(weird, { abilityMod: 2, dlceFormula: "2d6 + @prof" }).matchesDlce,
+    "unparseable custom formula flagged as mismatch"
+  );
+  assert(abilityModifier(null) === null && abilityModifier("") === null, "missing score → null mod");
 }
 
 {

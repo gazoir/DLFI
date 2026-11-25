@@ -473,7 +473,8 @@ function buildWeaponFromAttack(attack, fields) {
   const dexMod = abilityModifier(firstNumber(fields, ["check_dex", "combat_dex", "dex"]));
   const attackType = inferAttackType(name, fields.combat_actions);
   const statedBonus = String(attack.bonus || fields.combat_attack_bonus || "").trim();
-  const cr = firstNumber(fields, ["combat_cr", "cr", "challenge", "challenge_rating"]);
+  // Same CR the actor uses ("1/2" → 0.5, GG combat_level ÷ 4), so to-hit deltas match the sheet.
+  const cr = parseChallengeRating(fields);
   const prof =
     firstNumber(fields, ["check_prof", "combat_prof", "proficiency", "proficiency_bonus"]) ??
     proficiencyBonusFromCr(cr ?? 1);
@@ -653,7 +654,7 @@ function buildFeatFromAction(block) {
         _id: activityId,
         name: block.name.replace(/\s*\([^)]*\)\s*$/, "").trim() || "Save",
         activation,
-        consumption: { scaling: { allowed: false }, spellSlot: true, targets: [] },
+        consumption: { scaling: { allowed: false }, spellSlot: true, targets: recharge.consumptionTargets },
         duration: parseDuration(block.body),
         range: { override: false, units: "self" },
         target: {
@@ -663,7 +664,10 @@ function buildFeatFromAction(block) {
           prompt: true
         },
         uses: recharge.uses,
-        damage: { parts: [], onSave: /half/i.test(block.body) ? "half" : "none" },
+        damage: {
+          parts: parseDamagePartsFromText(block.body),
+          onSave: /half/i.test(block.body) ? "half" : "none"
+        },
         save: {
           ability: save.ability,
           dc: { calculation: "", formula: String(save.dc) }
@@ -675,7 +679,7 @@ function buildFeatFromAction(block) {
         _id: activityId,
         name: "Use",
         activation,
-        consumption: { scaling: { allowed: false }, spellSlot: true, targets: [] },
+        consumption: { scaling: { allowed: false }, spellSlot: true, targets: recharge.consumptionTargets },
         duration: parseDuration(block.body),
         range: { override: false, units: "self" },
         target: {
@@ -983,59 +987,49 @@ function parseSaveFromText(text) {
   return { ability, dc };
 }
 
-function parseRechargeFromNameOrBody(name, body) {
+/**
+ * Limited-use features: uses live on the Item only; the activity consumes one
+ * item use, so the counter never drifts and rest/recharge recovery applies once.
+ * @returns {{ uses: object, itemUses: object, consumptionTargets: object[] }}
+ */
+export function parseRechargeFromNameOrBody(name, body) {
   const text = `${name}\n${body}`;
-  const empty = {
-    uses: { spent: 0, recovery: [] },
-    itemUses: { spent: 0, max: "", recovery: [] }
-  };
+  const activityUses = { spent: 0, max: "", recovery: [] };
+  const limited = (recovery) => ({
+    uses: activityUses,
+    itemUses: { spent: 0, max: "1", recovery },
+    consumptionTargets: [{ type: "itemUses", target: "", value: "1", scaling: {} }]
+  });
 
   const rechargeDice = text.match(/recharge\s*(\d+)(?:\s*[–-]\s*(\d+))?/i);
   if (rechargeDice && !/short or long rest|short rest|long rest/i.test(text)) {
-    const formula = rechargeDice[2] ? String(rechargeDice[1]) : String(rechargeDice[1]);
-    return {
-      uses: {
-        spent: 0,
-        max: "1",
-        recovery: [{ period: "recharge", type: "recoverAll", formula }]
-      },
-      itemUses: {
-        spent: 0,
-        max: "1",
-        recovery: [{ period: "recharge", type: "recoverAll", formula }]
-      }
-    };
+    // "Recharge 5–6": recovers on a d6 roll of 5 or higher.
+    return limited([{ period: "recharge", type: "recoverAll", formula: String(rechargeDice[1]) }]);
   }
+  if (/short or long rest|after a short rest|per short rest/i.test(text)) {
+    return limited([{ period: "sr", type: "recoverAll" }]);
+  }
+  if (/recharges after a long rest|once per long rest|per long rest/i.test(text)) {
+    return limited([{ period: "lr", type: "recoverAll" }]);
+  }
+  return {
+    uses: activityUses,
+    itemUses: { spent: 0, max: "", recovery: [] },
+    consumptionTargets: []
+  };
+}
 
-  if (/recharges after a short or long rest|short or long rest/i.test(text)) {
-    return {
-      uses: {
-        spent: 0,
-        max: "1",
-        recovery: [{ period: "sr", type: "recoverAll" }]
-      },
-      itemUses: {
-        spent: 0,
-        max: "1",
-        recovery: [{ period: "sr", type: "recoverAll" }]
-      }
-    };
+/**
+ * Damage parts stated in an action's prose ("22 (5d8) fire damage").
+ * @param {string} body
+ */
+export function parseDamagePartsFromText(body) {
+  const parts = [];
+  const re = /(\d+d\d+(?:\s*[+-]\s*\d+)?)\)?\s*(acid|bludgeoning|cold|fire|force|lightning|necrotic|piercing|poison|psychic|radiant|slashing|thunder)\s+damage/gi;
+  for (const match of String(body ?? "").matchAll(re)) {
+    parts.push(parseExtraDamagePart(match[1].replace(/\s+/g, ""), match[2]));
   }
-  if (/recharges after a long rest|once per long rest/i.test(text)) {
-    return {
-      uses: {
-        spent: 0,
-        max: "1",
-        recovery: [{ period: "lr", type: "recoverAll" }]
-      },
-      itemUses: {
-        spent: 0,
-        max: "1",
-        recovery: [{ period: "lr", type: "recoverAll" }]
-      }
-    };
-  }
-  return empty;
+  return parts;
 }
 
 function inferActivation(name, body) {

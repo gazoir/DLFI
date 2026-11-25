@@ -20,6 +20,19 @@
 export function parseWeaponBaseDamage(formula, { abilityMod = null } = {}) {
   const parsed = parseDiceFormula(formula);
   if (parsed.custom) {
+    // Multi-dice ("2d6 + 1d4 + 3"): dnd5e still appends @mod, so take it out of the constant.
+    const split = splitFormulaConstant(formula);
+    if (split && abilityMod != null && Number.isFinite(abilityMod)) {
+      const leftover = split.constant - Number(abilityMod);
+      return {
+        number: null,
+        denomination: null,
+        bonus: "",
+        custom: { enabled: true, formula: joinFormula(split.dice, leftover) },
+        strippedAbilityMod: Number(abilityMod),
+        expectedTotalBonus: split.constant
+      };
+    }
     return {
       number: null,
       denomination: null,
@@ -68,6 +81,9 @@ export function parseExtraDamagePart(formula, type) {
 }
 
 export function abilityModifier(score) {
+  if (score == null || score === "") {
+    return null;
+  }
   const n = Number(score);
   if (!Number.isFinite(n)) {
     return null;
@@ -87,6 +103,37 @@ export function parseDiceFormula(formula) {
     bonus: match[3] ? String(Number(match[3])) : "",
     custom: ""
   };
+}
+
+/**
+ * Split a sum of dice terms and integers into its dice part and summed constant.
+ * Returns null for anything richer (roll data, functions, multiplication).
+ * @param {string} formula
+ * @returns {{ dice: string, constant: number }|null}
+ */
+export function splitFormulaConstant(formula) {
+  const cleaned = String(formula ?? "").replace(/\s+/g, "");
+  if (!cleaned || !/^[+-]?(\d+d\d+|\d+)([+-](\d+d\d+|\d+))*$/i.test(cleaned)) {
+    return null;
+  }
+  const dice = [];
+  let constant = 0;
+  for (const [, sign, term] of cleaned.matchAll(/([+-]?)(\d+d\d+|\d+)/gi)) {
+    if (/d/i.test(term)) {
+      dice.push(`${sign === "-" ? "- " : dice.length ? "+ " : ""}${term}`);
+    } else {
+      constant += (sign === "-" ? -1 : 1) * Number(term);
+    }
+  }
+  return { dice: dice.join(" "), constant };
+}
+
+function joinFormula(dice, constant) {
+  if (!constant) {
+    return dice;
+  }
+  const op = constant > 0 ? "+" : "-";
+  return dice ? `${dice} ${op} ${Math.abs(constant)}` : String(constant);
 }
 
 export function normalizeDamageType(value) {
@@ -125,10 +172,12 @@ export function resolveAttackAbility({
   proficiencyBonus = null,
   damageBonus = null
 } = {}) {
-  const stated = Number(String(statedBonus ?? "").replace(/^\+/, ""));
+  const statedText = String(statedBonus ?? "").trim().replace(/^\+/, "");
+  const stated = statedText === "" ? NaN : Number(statedText);
   const prof = Number(proficiencyBonus);
-  const str = Number.isFinite(Number(strMod)) ? Number(strMod) : null;
-  const dex = Number.isFinite(Number(dexMod)) ? Number(dexMod) : null;
+  const asMod = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  const str = asMod(strMod);
+  const dex = asMod(dexMod);
 
   if (attackType === "ranged") {
     return { ability: "dex", mod: dex };
@@ -273,6 +322,19 @@ export function buildAttackConfig({
  * @returns {{ formula: string, matchesDlce: boolean, dlceBonus: number|null }}
  */
 export function predictFoundryBaseDamage(baseDamage, { abilityMod = null, dlceFormula = "" } = {}) {
+  if (baseDamage?.custom?.enabled) {
+    const custom = String(baseDamage.custom.formula ?? "");
+    const hasMod = abilityMod != null && Number.isFinite(abilityMod);
+    const formula = hasMod && !/@mod/.test(custom) ? `${custom} + @mod` : custom;
+    const ours = splitFormulaConstant(custom);
+    const theirs = splitFormulaConstant(dlceFormula);
+    const expectedNumeric = ours && hasMod ? ours.constant + Number(abilityMod) : null;
+    const matchesDlce =
+      Boolean(ours && theirs) &&
+      ours.dice.replace(/\s+/g, "") === theirs.dice.replace(/\s+/g, "") &&
+      (expectedNumeric == null || expectedNumeric === theirs.constant);
+    return { formula, matchesDlce, dlceBonus: theirs?.constant ?? null, expectedNumeric, custom: true };
+  }
   const dice =
     baseDamage?.number != null && baseDamage?.denomination != null
       ? `${baseDamage.number}d${baseDamage.denomination}`
