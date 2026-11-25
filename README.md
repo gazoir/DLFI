@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.53`)
+## Status (`0.1.54`)
 
+- **0.1.54:** Code-review fixes. Re-import builds the new session first and only purges the old one on success (rollback on failure). Item-pile and session deletes only touch DLFI-created documents. PCs reused across sessions now count as members of each one. Trusted/GM accounts are never renamed or re-roled. Zip reading is hardened (central directory, path checks) and the inbox reads only manifest + thumbnail. Journal HTML is sanitised. Uploads are batched with a folder cache and per-file result checks. Token wildcard, landing-art and asset lookups are stricter. NPC save actions carry damage, recharge uses live on the item, and weapon proficiency follows the stat-block CR. Items keep fractional gp and their rarity. New world setting **Suppress loading bars for players** (default on; scene loads only; GMs still see them).
 - **0.1.53:** Suppress Foundry's scene texture "Loading …" progress toast globally (all clients; always on)
 - **0.1.52:** Loot / cash items set dnd5e \`system.price\` from DLCE \`fields.gp_value\` (e.g. White metal Epergne → 393 gp)
 - **0.1.51:** Hardened Scene Directory thumbnails — ImageHelper fallback + end-of-import refresh (fixes empty sidebar / Session Scenes modal)
