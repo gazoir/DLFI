@@ -5,11 +5,12 @@
  * action is the trigger). DLFI cancels that action and:
  *   1. Scene A is the scene where the click happened.
  *   2. Scene B is the scene the tile represents.
- *   3. Repaint B as it should look once B is the viewed scene.
- *   4. View B (does not activate it for the players).
- *   5. Repaint A.
- * Other scenes are left alone. Pressing the combat hotkey still repaints the
- * whole session, because that can change which scene is active.
+ *   3. Repaint B for the view you are about to open. The outline stays on the
+ *      scene the players are in (`scene.active`), which this click does not change.
+ *   4. View B.
+ *   5. Repaint B again now that it is on screen, then repaint A.
+ * Other scenes are left alone. A tile that is not a DLFI nav thumbnail still
+ * runs its own Monk's Active Tiles actions, including a scene change.
  */
 
 import {
@@ -35,6 +36,29 @@ let queuedTileId = null;
 /** @type {{ key: string, styles: { active: object[], neither: object[] } | null } | null} */
 let styleCache = null;
 let warnedMissingStyles = false;
+
+/** Token Magic identity fields. Copied params must not reuse these across tiles. */
+const FILTER_IDENTITY = [
+  "filterId",
+  "filterInternalId",
+  "placeableId",
+  "placeableType",
+  "updateId",
+  "filterOwner",
+  "rank"
+];
+
+/**
+ * The scene the players are in. `game.scenes.active` is that same scene; the
+ * boolean is read directly so a GM view cannot be mistaken for it.
+ * @returns {string}
+ */
+function playerActiveSceneId() {
+  const scenes = globalThis.game?.scenes;
+  const contents = scenes?.contents ?? [];
+  const flagged = contents.find((scene) => scene.active === true);
+  return flagged?.id ?? "";
+}
 
 export function registerNavHighlightSettings() {
   game.settings.register(MODULE_ID, SETTING_NAV_TMFX_ACTIVE, {
@@ -140,15 +164,29 @@ async function performNavView(tileDoc) {
   if (!sceneA || !sceneB) {
     return;
   }
-  const activeId = globalThis.game?.scenes?.active?.id ?? "";
-  const viewedId = sceneB.id;
   const styles = await loadNavStyles();
+  const activeBefore = playerActiveSceneId();
+
+  // Write B before it draws, so the first frame is not the previous visit.
   if (styles) {
-    await paintNavScene(sceneB, styles, activeId, viewedId);
+    await paintNavScene(sceneB, styles, activeBefore, sceneB.id);
   }
   if (sceneA.id !== sceneB.id) {
     await sceneB.view();
-    if (styles) {
+  }
+
+  // Token Magic only redraws a tile while its scene is the viewed one.
+  // Paint the scene on screen after the view, then the scene just left.
+  const viewedId = globalThis.canvas?.scene?.id ?? sceneB.id;
+  const activeId = playerActiveSceneId();
+  const viewedScene = globalThis.canvas?.scene ?? sceneB;
+  console.log(
+    `${MODULE_ID} | nav ${viewedScene?.name ?? sceneB.name}` +
+      ` viewed, players still in ${globalThis.game?.scenes?.get?.(activeId)?.name ?? "no active scene"}`
+  );
+  if (styles) {
+    await paintNavScene(viewedScene, styles, activeId, viewedId);
+    if (sceneA.id !== viewedId) {
       await paintNavScene(sceneA, styles, activeId, viewedId);
     }
   }
@@ -180,23 +218,35 @@ async function paintNavScene(scene, styles, activeId, viewedId) {
 }
 
 /**
- * @param {object} tile
+ * Drop ids copied from the macro that recorded the preset. Reusing them makes
+ * Token Magic stack the outline and the darken onto one tile.
  * @param {object[]} params
+ * @returns {object[]}
  */
+function detachedFilterParams(params) {
+  const cloned = foundry.utils.deepClone(params);
+  for (const entry of cloned) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    for (const key of FILTER_IDENTITY) {
+      delete entry[key];
+    }
+  }
+  return cloned;
+}
+
 async function applyNavTmfx(tile, params) {
   const TokenMagic = globalThis.TokenMagic;
+  const onViewedScene = tile.parent?.id && tile.parent.id === globalThis.canvas?.scene?.id;
   const placeable =
-    tile.object ??
-    (tile.parent?.id && tile.parent.id === globalThis.canvas?.scene?.id
-      ? globalThis.canvas?.tiles?.get?.(tile.id)
-      : null) ??
-    null;
+    tile.object ?? (onViewedScene ? globalThis.canvas?.tiles?.get?.(tile.id) : null) ?? null;
   const target = placeable ?? tile;
-  if (params.length) {
-    await TokenMagic.addFilters(target, foundry.utils.deepClone(params), true);
-    return;
-  }
+  // Clear first so a previous outline does not sit under the new preset.
   await TokenMagic.deleteFilters(target);
+  if (params.length) {
+    await TokenMagic.addFilters(target, detachedFilterParams(params), true);
+  }
 }
 
 /**
