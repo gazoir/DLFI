@@ -3,7 +3,9 @@
  *
  * Expo Location template: ~22 landscape tiles (left/bottom padding) for
  * Landing → locations → Outro; ~6 portrait tiles (right padding) for battlemaps.
- * Click → view target scene (GM). Hover shows scene name via DLFI tooltip hook.
+ * Click → DLFI views the target scene (GM). The MATT scene action is only the
+ * click trigger; DLFI cancels it, repaints the destination, views it, then
+ * repaints the scene you left. Hover shows the scene name via the tooltip hook.
  *
  * Left list order: Landing → locations (MSD order) → Outro.
  * When more than 22 targets, each scene gets a rolling window that starts shifting

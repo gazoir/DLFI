@@ -24,6 +24,7 @@ import {
 } from "./constants.mjs";
 import { registerHideLandingEffectsHooks } from "./canvas/hideLandingEffects.mjs";
 import { registerMattNavTooltipHooks } from "./canvas/mattNavTooltip.mjs";
+import { registerMattNavViewHooks, registerNavHighlightSettings } from "./canvas/mattNavView.mjs";
 import { registerSuppressSceneLoadingBar } from "./canvas/suppressSceneLoadingBar.mjs";
 import { ensureDataFolder } from "./package/dataFolders.mjs";
 import { ensureInboxRoot } from "./package/inbox.mjs";
@@ -152,8 +153,11 @@ Hooks.once("init", () => {
     default: true
   });
 
+  registerNavHighlightSettings();
+
   // Register canvas hooks before the first canvasReady fires.
   registerSuppressSceneLoadingBar();
+  registerMattNavViewHooks();
   canvasReadyHandlers.push(registerHideLandingEffectsHooks().onCanvasReady);
   canvasReadyHandlers.push(registerMattNavTooltipHooks().onCanvasReady);
 
