@@ -25,6 +25,10 @@ export const SETTING_REPLACE_ON_REIMPORT = "replaceOnReimport";
  */
 export const SETTING_PLAYERS_UNLOCKED = "playersUnlocked";
 export const SETTING_SUPPRESS_LOADING_BARS = "suppressPlayerLoadingBars";
+/** Macro UUID for the outline on the nav tile of the active scene. Blank uses the combat macro's saved UUID. */
+export const SETTING_NAV_TMFX_ACTIVE = "navTmfxActiveMacro";
+/** Macro UUID for the darken on nav tiles that are neither active nor viewed. */
+export const SETTING_NAV_TMFX_NEITHER = "navTmfxNeitherMacro";
 
 /** Keep this many zip copies per session under the DLCE inbox. */
 export const INBOX_KEEP_PER_SESSION = 3;

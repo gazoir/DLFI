@@ -1177,6 +1177,42 @@ for (const path of paths) {
     mattNavTooltipText({ name: "Nope", flags: { dlfi: { kind: "matt-nav-face" } } }) === "",
     "face tiles have no tooltip"
   );
+
+  const { navTileFilterParams } = await import("../canvas/navTileHighlight.mjs");
+  const styles = {
+    active: [{ filterType: "outline" }],
+    neither: [{ filterType: "darken" }]
+  };
+  const thumb = {
+    flags: { dlfi: { kind: "matt-nav-left", targetSceneId: "Scene.sceneB" } }
+  };
+  const face = {
+    flags: { dlfi: { kind: "matt-nav-face", targetSceneId: "sceneB" } }
+  };
+  assert(
+    navTileFilterParams(thumb, "sceneB", "sceneA", styles)[0]?.filterType === "outline",
+    "active thumbnail is outlined"
+  );
+  assert(
+    navTileFilterParams(thumb, "sceneB", "sceneB", styles)[0]?.filterType === "outline",
+    "active and viewed thumbnail is outline only"
+  );
+  assert(
+    navTileFilterParams(thumb, "sceneA", "sceneB", styles).length === 0,
+    "viewed thumbnail is clear"
+  );
+  assert(
+    navTileFilterParams(thumb, "sceneC", "sceneA", styles)[0]?.filterType === "darken",
+    "other thumbnail is darkened"
+  );
+  assert(
+    navTileFilterParams(face, "sceneB", "sceneB", styles).length === 0,
+    "viewed portrait is clear, even when its scene is active"
+  );
+  assert(
+    navTileFilterParams(face, "sceneB", "sceneA", styles)[0]?.filterType === "darken",
+    "unviewed portrait is darkened, never outlined"
+  );
 }
 
 // Location POIs → emoji list (strip wikilinks, blank lines between)
