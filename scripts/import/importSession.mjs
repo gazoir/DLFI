@@ -644,9 +644,13 @@ export async function importSessionPackage(loaded, options = {}) {
     }))
   );
 
+  const npcIds = new Set([
+    ...npcEntries.map((entry) => entry.id),
+    ...(manifest.pcs ?? []).flatMap((pc) => (pc.pets ?? []).map((pet) => pet.id))
+  ].filter(Boolean));
   const npcActorData = npcEntries.map((entry) => {
     const raw = npcRawById.get(entry.id) ?? {};
-    const { portrait, token, tokenSlots, tokenWildcard } = resolveNpcMedia(entry, uploaded);
+    const { portrait, token, tokenSlots, tokenWildcard } = resolveNpcMedia(entry, uploaded, { npcIds });
     return buildNpcNpcActorData(raw, entry, {
       portrait,
       token,
@@ -801,7 +805,7 @@ export async function importSessionPackage(loaded, options = {}) {
         token: pet.token,
         tokenScale: pet.tokenScale
       };
-      const petMedia = resolveNpcMedia(petEntry, uploaded);
+      const petMedia = resolveNpcMedia(petEntry, uploaded, { npcIds });
       const petActorData = buildNpcNpcActorData(petRaw, petEntry, {
         portrait: petMedia.portrait,
         token: petMedia.token,

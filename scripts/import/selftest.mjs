@@ -1379,6 +1379,17 @@ for (const path of paths) {
     skipItemPiles: true
   });
   assert(npcUpdates.length === 1, "location NPC token updated");
+  assert(npcUpdates[0].actorLink === true, "non-combat location NPC stays linked");
+  npcUpdates.length = 0;
+  stubLoc.tokens.contents.forEach((t) => (t.flags = {}));
+  await finalizeLocationScene(stubLoc, {
+    npcs: [{ actor: { id: "npc2", uuid: "Actor.npc2", name: "Bandit", prototypeToken: { actorLink: false } } }],
+    skipItemPiles: true
+  });
+  assert(
+    npcUpdates[0]?.actorLink === false,
+    "combat enemy on a location follows its unlinked prototype (base actor untouched)"
+  );
   assert(
     npcUpdates[0].flags?.healthEstimate?.hideHealthEstimate === true,
     "location NPC Health Estimate hidden"
@@ -1873,6 +1884,44 @@ for (const path of paths) {
   const spec = tokenPlacementSpec({ actor: fakeActor, linked: false, kind: "battle-enemy" });
   assert(spec.width === 2 && spec.textureSrc === "ogre_token.png", "tokenPlacementSpec from prototype");
 
+  // 1080p map, 0.25 padding, grid 120: Large enemy must not overlap the party row.
+  {
+    const m1080 = { width: 2880, height: 1620, sceneWidth: 1920, sceneHeight: 1080, sceneX: 480, sceneY: 270, mapBottom: 1350, canvasBottom: 1620, gridSize: 120 };
+    const large = { name: "Ogre", actorId: "o", actorUuid: "Actor.o", linked: false, kind: "battle-enemy", width: 2, height: 2 };
+    const pcRow = { name: "Ibby", actorId: "pc", actorUuid: "Actor.pc", linked: true, kind: "battle-pc", width: 1, height: 1 };
+    const tight = layoutBattlemapRosterLines({ metrics: m1080, grid: 120, enemySpecs: [large], partySpecs: [pcRow] });
+    const ogre = tight.enemyTokens[0];
+    const ibby = tight.partyTokens[0];
+    assert(ogre.y + ogre.height * 120 <= ibby.y, "Large enemy bottom stays above the party row (no overlap)");
+  }
+  {
+    const { withPrototypeTokenData } = await import("./scenePlacement.mjs");
+    const savedGame = globalThis.game;
+    globalThis.game = {
+      actors: {
+        get: (id) =>
+          id === "proto"
+            ? {
+                async getTokenDocument(data) {
+                  const merged = { _id: "tmp", sight: { enabled: true, range: 60 }, bar1: { attribute: "attributes.hp" }, ...data };
+                  return { toObject: () => merged };
+                }
+              }
+            : null
+      }
+    };
+    const [merged, bare] = await withPrototypeTokenData([
+      { actorId: "proto", name: "Ibby", x: 1 },
+      { actorId: "missing", name: "Ghost" }
+    ]);
+    assert(
+      merged.sight?.enabled === true && merged.bar1?.attribute === "attributes.hp" && merged.x === 1 && !("_id" in merged),
+      "created tokens inherit prototype sight/bars"
+    );
+    assert(bare.name === "Ghost" && !bare.sight, "token without a world actor keeps its payload");
+    globalThis.game = savedGame;
+  }
+
   // sceneCanvasMetrics falls back when dimensions missing
   const m = sceneCanvasMetrics({ width: 1000, height: 2000, grid: { size: 100 } });
   assert(m.canvasBottom === 2000 && m.gridSize === 100, "sceneCanvasMetrics fallback");
@@ -1989,6 +2038,48 @@ for (const path of paths) {
     uploaded
   );
   assert(explicit.slots.length === 3, "explicit tokenWildcard expands uploaded matches");
+
+  const guards = new Map(
+    ["assets/npc/tokens/npc_guard1.webp", "assets/npc/tokens/npc_guard2.webp"].map((p) => [p, `w/${p}`])
+  );
+  assert(
+    discoverTokenSlotPaths("npc_guard", guards).length === 0,
+    "npc_guard1 / npc_guard2 (no separator) are not slots of npc_guard"
+  );
+  const captainClash = new Map(
+    [
+      "assets/npc/tokens/npc_guard_1.webp",
+      "assets/npc/tokens/npc_guard_2.webp",
+      "assets/npc/tokens/npc_guard_captain_1.webp"
+    ].map((p) => [p, `w/${p}`])
+  );
+  const clash = resolveNpcTokenSlots({ id: "npc_guard" }, captainClash);
+  assert(
+    clash.wildcard === null && clash.firstSlot === "w/assets/npc/tokens/npc_guard_1.webp",
+    "wildcard that would also match another NPC's token is dropped (first slot used)"
+  );
+  assert(
+    resolveNpcMedia({ id: "npc_guard" }, captainClash).token === "w/assets/npc/tokens/npc_guard_1.webp",
+    "resolveNpcMedia uses first slot when no safe wildcard"
+  );
+  assert(
+    discoverTokenSlotPaths("npc_guard", new Map([["assets/npc/tokens/npc_guard_1.webp", "a"], ["assets/npc/tokens/npc_guard_2.webp", "b"]]), {
+      npcIds: ["npc_guard", "npc_guard_2"]
+    }).length === 1,
+    "slot stem that is another manifest NPC id is skipped"
+  );
+  const staleWildcard = resolveNpcTokenSlots(
+    { id: "npc_goblin", tokenWildcard: "assets/npc/tokens/missing_*.webp" },
+    uploaded
+  );
+  assert(
+    staleWildcard.wildcard === "dlfi-imports/S1__x__stamp/assets/npc/tokens/npc_goblin_*.webp",
+    "declared wildcard that matched nothing is not used as texture.src"
+  );
+  assert(
+    buildTokenWildcard(["assets/npc/tokens/a_1.webp", "assets/npc/tokens/b_2.webp"]) === null,
+    "no folder-wide wildcard for unrelated slot names"
+  );
 
   const multi = buildNpcNpcActorData(baseRaw, baseEntry, {
     token: media.token,
@@ -2406,7 +2497,7 @@ for (const path of paths) {
   assert(token.disposition === 1, "pile disposition friendly");
   assert(token.width === 1 && token.height === 1, "pile footprint 1×1");
   assert(token.texture.scaleX === ITEM_PILE_SCALE && token.texture.fit === "contain", "pile scale/fit");
-  assert(token.vision === false, "pile token vision disabled");
+  assert(token.sight?.enabled === false && !("vision" in token), "pile token sight disabled (no legacy vision field)");
   assert(token.sight?.enabled === false, "pile token sight.enabled false");
   assert(token.flags.itempiles == null, "item piles flag uses hyphenated scope");
   assert(token.flags["item-piles"]?.data?.type === "pile", "item-piles data.type=pile");

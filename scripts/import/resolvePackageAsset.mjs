@@ -24,43 +24,56 @@ export function lookupUploaded(uploaded, candidates = []) {
   return null;
 }
 
+/** @type {WeakMap<Map<string, string>, Map<string, Array<[string, string]>>>} */
+const basenameIndexCache = new WeakMap();
+
+/** basename → [packagePath, worldPath][] for an uploads map (built once per map). */
+function basenameIndex(uploaded) {
+  let index = basenameIndexCache.get(uploaded);
+  if (index && index.__size === uploaded.size) {
+    return index;
+  }
+  index = new Map();
+  for (const [packagePath, worldPath] of uploaded.entries()) {
+    const base = packagePath.split("/").pop()?.toLowerCase() ?? "";
+    const list = index.get(base) ?? [];
+    list.push([packagePath, worldPath]);
+    index.set(base, list);
+  }
+  index.__size = uploaded.size;
+  basenameIndexCache.set(uploaded, index);
+  return index;
+}
+
 /**
- * Find an uploaded asset whose filename matches (e.g. loc_ancient_ruin.webp).
+ * Find an uploaded asset whose filename matches (e.g. loc_ancient_ruin.webp),
+ * only inside `preferredFolders` (earlier folders win). A root folder such as
+ * `assets` matches files directly inside it, not every subfolder — otherwise an
+ * NPC could pick up an item's art with the same filename.
  * @param {Map<string, string>} uploaded
  * @param {string[]} fileNames
  * @param {string[]} [preferredFolders]
  */
 export function lookupUploadedByFileName(uploaded, fileNames = [], preferredFolders = []) {
-  const wanted = new Set(
-    fileNames
-      .filter(Boolean)
-      .map((name) => String(name).replace(/^\/+/, "").split("/").pop().toLowerCase())
-  );
-  if (!wanted.size) {
-    return null;
-  }
-
-  const entries = [...uploaded.entries()];
   const prefer = preferredFolders.map((folder) =>
     String(folder).replace(/^\/+|\/+$/g, "").toLowerCase()
   );
-
-  const ranked = entries
-    .map(([packagePath, worldPath]) => {
-      const base = packagePath.split("/").pop()?.toLowerCase() ?? "";
-      if (!wanted.has(base)) {
-        return null;
-      }
+  const index = basenameIndex(uploaded);
+  let best = null;
+  for (const name of fileNames) {
+    if (!name) continue;
+    const base = String(name).replace(/^\/+/, "").split("/").pop().toLowerCase();
+    for (const [packagePath, worldPath] of index.get(base) ?? []) {
       const folder = packagePath.split("/").slice(0, -1).join("/").toLowerCase();
       const preferIndex = prefer.findIndex(
-        (prefix) => folder === prefix || folder.startsWith(`${prefix}/`)
+        (prefix) => folder === prefix || (prefix.includes("/") && folder.startsWith(`${prefix}/`))
       );
-      return { worldPath, preferIndex: preferIndex === -1 ? 999 : preferIndex };
-    })
-    .filter(Boolean)
-    .sort((a, b) => a.preferIndex - b.preferIndex);
-
-  return ranked[0]?.worldPath ?? null;
+      if (preferIndex !== -1 && (!best || preferIndex < best.preferIndex)) {
+        best = { worldPath, preferIndex };
+      }
+    }
+  }
+  return best?.worldPath ?? null;
 }
 
 /**
@@ -98,7 +111,7 @@ export function resolveLocationBackground(entry, uploaded) {
 /**
  * NPC portrait / token art.
  */
-export function resolveNpcMedia(entry, uploaded) {
+export function resolveNpcMedia(entry, uploaded, { npcIds = null } = {}) {
   const id = String(entry?.id ?? "").trim();
   const stems = [id, id.replace(/^npc_/, "")].filter(Boolean);
   const portraitNames = [];
@@ -124,7 +137,7 @@ export function resolveNpcMedia(entry, uploaded) {
       "assets"
     ]);
 
-  const token =
+  const explicitToken =
     lookupUploaded(uploaded, [
       entry?.token,
       id ? `assets/token/${id}.webp` : null,
@@ -136,10 +149,11 @@ export function resolveNpcMedia(entry, uploaded) {
       "assets/npc",
       "assets/portraits",
       "assets"
-    ]) ||
-    portrait;
+    ]);
 
-  const { slots, wildcard } = resolveNpcTokenSlots(entry, uploaded);
+  const { slots, wildcard, firstSlot } = resolveNpcTokenSlots(entry, uploaded, { npcIds });
+  // Slots that cannot form a safe wildcard: use the first one, without randomImg.
+  const token = explicitToken || firstSlot || portrait;
   if (slots.length >= 2) {
     return {
       portrait,

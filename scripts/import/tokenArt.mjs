@@ -90,19 +90,6 @@ export function sortSlotPaths(paths) {
   });
 }
 
-function longestCommonPrefix(values) {
-  if (!values.length) {
-    return "";
-  }
-  let prefix = values[0];
-  for (const value of values.slice(1)) {
-    while (prefix && !value.startsWith(prefix)) {
-      prefix = prefix.slice(0, -1);
-    }
-  }
-  return prefix;
-}
-
 /**
  * Wildcard path (single `*`) covering a set of sequentially numbered paths.
  * `a/n_1.webp`, `a/n_2.webp` → `a/n_*.webp`
@@ -114,6 +101,8 @@ export function buildTokenWildcard(paths) {
   if (list.length < 2) {
     return null;
   }
+  // Slots must share folder, a filename prefix and extension; callers also check the
+  // glob covers exactly the slots so ".../tokens/z_*.webp" never pulls in other art.
   const parsed = list.map(parseSlotPath);
   if (
     parsed.every(Boolean) &&
@@ -121,10 +110,23 @@ export function buildTokenWildcard(paths) {
   ) {
     return `${parsed[0].prefix}*${parsed[0].ext}`;
   }
-  const prefix = longestCommonPrefix(list);
-  const exts = new Set(list.map((p) => (p.match(/\.[A-Za-z0-9]+$/)?.[0] ?? "").toLowerCase()));
-  const ext = exts.size === 1 ? [...exts][0] : "";
-  return `${prefix}*${ext}`;
+  const folders = new Set(list.map((path) => path.split("/").slice(0, -1).join("/")));
+  const exts = new Set(list.map((path) => (path.match(/\.[A-Za-z0-9]+$/)?.[0] ?? "").toLowerCase()));
+  if (folders.size !== 1 || exts.size !== 1) {
+    return null;
+  }
+  let prefix = list[0];
+  for (const path of list.slice(1)) {
+    while (prefix && !path.startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+    }
+  }
+  const folder = [...folders][0];
+  // Needs part of a filename in common, not just the folder.
+  if (prefix.length <= (folder ? folder.length + 1 : 0)) {
+    return null;
+  }
+  return `${prefix}*${[...exts][0]}`;
 }
 
 /**
@@ -133,11 +135,14 @@ export function buildTokenWildcard(paths) {
  * @param {Map<string, string>} uploaded packagePath -> world path
  * @returns {string[]} package paths, sequentially sorted
  */
-export function discoverTokenSlotPaths(npcId, uploaded) {
+export function discoverTokenSlotPaths(npcId, uploaded, { npcIds = null } = {}) {
   const id = String(npcId ?? "").trim();
   if (!id) {
     return [];
   }
+  const otherIds = new Set(
+    [...(npcIds ?? [])].map((value) => String(value).toLowerCase()).filter((value) => value !== id.toLowerCase())
+  );
   const stems = [...new Set([id, id.replace(/^npc_/, "")].filter(Boolean))];
   const found = [];
   for (const packagePath of uploaded.keys()) {
@@ -147,7 +152,11 @@ export function discoverTokenSlotPaths(npcId, uploaded) {
     }
     const base = normalized.split("/").pop() ?? "";
     const parsed = parseSlotPath(base);
-    if (!parsed) {
+    // A separator before the number is required: npc_guard1 is another NPC, not slot 1.
+    if (!parsed || !/[_.\- ]$/.test(parsed.prefix)) {
+      continue;
+    }
+    if (otherIds.has(base.replace(/\.[A-Za-z0-9]+$/, "").toLowerCase())) {
       continue;
     }
     const stem = parsed.prefix.replace(/[_.\- ]+$/, "");
@@ -162,10 +171,10 @@ export function discoverTokenSlotPaths(npcId, uploaded) {
  * Resolve multi-slot token art for an NPC document entry.
  * @param {object} entry manifest document entry
  * @param {Map<string, string>} uploaded packagePath -> world Data path
- * @returns {{ slots: string[], packageSlots: string[], wildcard: string|null }}
+ * @param {{ npcIds?: Iterable<string> }} [options] every NPC id in the manifest
+ * @returns {{ slots: string[], packageSlots: string[], wildcard: string|null, firstSlot: string|null }}
  */
-export function resolveNpcTokenSlots(entry, uploaded) {
-  const empty = { slots: [], packageSlots: [], wildcard: null };
+export function resolveNpcTokenSlots(entry, uploaded, { npcIds = null } = {}) {
   const declared = [entry?.tokens, entry?.tokenSlots].find(Array.isArray) ?? [];
   let packageSlots = declared.map(normalizePath).filter((path) => uploaded.has(path));
 
@@ -173,30 +182,42 @@ export function resolveNpcTokenSlots(entry, uploaded) {
     .map((value) => (typeof value === "string" ? normalizePath(value) : ""))
     .find((value) => value.includes("*"));
 
+  let wildcardSuppliedSlots = false;
   if (explicitWildcard) {
     const matcher = wildcardToRegExp(explicitWildcard);
     const matched = sortSlotPaths([...uploaded.keys()].filter((path) => matcher.test(path)));
-    if (matched.length) {
+    if (matched.length >= 2) {
       packageSlots = matched;
+      wildcardSuppliedSlots = true;
     }
   }
 
   if (packageSlots.length < 2) {
-    packageSlots = discoverTokenSlotPaths(entry?.id, uploaded);
+    packageSlots = discoverTokenSlotPaths(entry?.id, uploaded, { npcIds });
   }
+  packageSlots = sortSlotPaths([...new Set(packageSlots)]);
+  const firstSlot = packageSlots.length ? uploaded.get(packageSlots[0]) ?? null : null;
+  const empty = { slots: [], packageSlots, wildcard: null, firstSlot };
   if (packageSlots.length < 2) {
     return empty;
   }
-  packageSlots = sortSlotPaths([...new Set(packageSlots)]);
 
-  const packageWildcard = explicitWildcard || buildTokenWildcard(packageSlots);
+  const packageWildcard = wildcardSuppliedSlots ? explicitWildcard : buildTokenWildcard(packageSlots);
   if (!packageWildcard) {
+    return empty;
+  }
+  // The glob must cover exactly these slots — otherwise randomImg would pick up other art.
+  const matcher = wildcardToRegExp(packageWildcard);
+  const covered = [...uploaded.keys()].map(normalizePath).filter((path) => matcher.test(path));
+  const slotSet = new Set(packageSlots);
+  if (covered.length !== slotSet.size || covered.some((path) => !slotSet.has(path))) {
     return empty;
   }
   const slots = packageSlots.map((path) => uploaded.get(path)).filter(Boolean);
   return {
     slots,
     packageSlots,
+    firstSlot,
     wildcard: toWorldWildcard(packageWildcard, packageSlots[0], uploaded.get(packageSlots[0]))
   };
 }

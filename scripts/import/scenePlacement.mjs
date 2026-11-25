@@ -219,8 +219,6 @@ export function buildItemPileTokenData({
     height: 1,
     x: Math.round(Number(x) || 0),
     y: Math.round(Number(y) || 0),
-    // Foundry V10+ uses sight.enabled; older builds used vision.
-    vision: false,
     sight: { enabled: false },
     texture,
     flags: {
@@ -646,8 +644,9 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
     const itemPayload = itemDataForPile(item);
 
     if (typeof api?.createItemPile === "function") {
+      let result = null;
       try {
-        const result = await api.createItemPile({
+        result = await api.createItemPile({
           position: { x: pos.x, y: pos.y },
           sceneId: scene.id,
           createActor: true,
@@ -674,7 +673,6 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
             displayName: tokenDisplayAlways(),
             width: 1,
             height: 1,
-            vision: false,
             sight: { enabled: false },
             texture: {
               ...(img ? { src: img } : {}),
@@ -693,7 +691,16 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
             }
           }
         });
-
+      } catch (error) {
+        console.warn(
+          `${MODULE_ID} | ${scene.name}: createItemPile failed for ${name}; falling back to Token create`,
+          error
+        );
+        result = null;
+      }
+      if (result) {
+      // The pile exists from here on: follow-up failures must not add a fallback token too.
+      try {
         const tokenUuid = result?.tokenUuid ?? result?.token?.uuid ?? null;
         const actorUuid = result?.actorUuid ?? result?.actor?.uuid ?? null;
 
@@ -706,7 +713,6 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
               [`flags.${FLAG_SCOPE}.dlceId`]: dlceId,
               ...(importKey ? { [`flags.${FLAG_SCOPE}.importKey`]: importKey } : {}),
               ...(sessionCode ? { [`flags.${FLAG_SCOPE}.sessionCode`]: sessionCode } : {}),
-              vision: false,
               "sight.enabled": false,
               ...(img ? { "texture.src": img } : {}),
               name
@@ -725,14 +731,11 @@ export async function placeLocationItemPiles(scene, items = [], options = {}) {
           dlceId,
           itemUuid
         });
-
-        placed += 1;
-        continue;
       } catch (error) {
-        console.warn(
-          `${MODULE_ID} | ${scene.name}: createItemPile failed for ${name}; falling back to Token create`,
-          error
-        );
+        console.warn(`${MODULE_ID} | ${scene.name}: pile ${name} created, but tagging/finalize failed`, error);
+      }
+      placed += 1;
+      continue;
       }
     }
 
@@ -1072,7 +1075,7 @@ export async function finalizeBattlemapScene(scene, options = {}) {
     partySpecs
   });
 
-  const create = [...layout.enemyTokens, ...layout.partyTokens];
+  const create = await withPrototypeTokenData([...layout.enemyTokens, ...layout.partyTokens]);
   const enemyIds = [...new Set(expandedEnemies.map((row) => row.actor?.id).filter(Boolean))];
   const partyIds = partyRows.map((row) => row.dlceId || row.actor?.id).filter(Boolean);
   if (!layout.enemyTokens.length) {
@@ -1187,11 +1190,16 @@ export function layoutBattlemapRosterLines({
     partySpecs.length && maxPartyH > 0
       ? partyBaseline - maxPartyH * grid - rowGap
       : partyBaseline;
-  // Keep enemy tops at or below the map art bottom when padding allows.
+  // Keep enemy tops at or below the map art bottom when padding allows,
+  // but never push Large+ enemies down into the party row.
   if (maxEnemyH > 0) {
     const minEnemyBaseline = metrics.mapBottom + maxEnemyH * grid;
+    const maxEnemyBaseline =
+      partySpecs.length && maxPartyH > 0
+        ? partyBaseline - maxPartyH * grid - gap
+        : metrics.canvasBottom;
     if (enemyBaseline < minEnemyBaseline && minEnemyBaseline <= metrics.canvasBottom) {
-      enemyBaseline = minEnemyBaseline;
+      enemyBaseline = Math.max(enemyBaseline, Math.min(minEnemyBaseline, maxEnemyBaseline));
     }
   }
 
@@ -1280,7 +1288,7 @@ export async function finalizeLeftoversScene(scene, { npcs = [], itemNotes = [] 
         text: note.name,
         x: spacing * (index + 1),
         y: Math.floor((scene.height ?? 2000) * 0.35),
-        icon: note.img || "icons/svg/item-bag.svg",
+        texture: { src: note.img || "icons/svg/item-bag.svg" },
         iconSize: 64,
         fontSize: 24,
         textAnchor: 1,
@@ -1341,6 +1349,37 @@ async function applyLocationFieldDrawing(
   ]);
 }
 
+/**
+ * Merge Token create payloads over each Actor's prototype token so vision,
+ * detection modes, bars, light and ring settings carry over.
+ * @param {object[]} tokens create payloads with `actorId`
+ * @returns {Promise<object[]>}
+ */
+export async function withPrototypeTokenData(tokens) {
+  return Promise.all(
+    tokens.map(async (data) => {
+      const actor = data?.actorId ? globalThis.game?.actors?.get?.(data.actorId) : null;
+      if (typeof actor?.getTokenDocument !== "function") {
+        return data;
+      }
+      try {
+        const object = (await actor.getTokenDocument(data)).toObject();
+        delete object._id;
+        return object;
+      } catch (error) {
+        console.warn(`${MODULE_ID} | prototype token merge failed for ${data.name}`, error);
+        return data;
+      }
+    })
+  );
+}
+
+/** Location NPCs follow the prototype: combat enemies stay unlinked so location damage never touches the base actor. */
+function prototypeActorLink(actor) {
+  const link = actor?.prototypeToken?.actorLink;
+  return typeof link === "boolean" ? link : true;
+}
+
 async function placeNpcsOnScene(scene, npcs, slots) {
   const used = new Set();
   const updates = [];
@@ -1358,7 +1397,7 @@ async function placeNpcsOnScene(scene, npcs, slots) {
         _id: token.id,
         name: actor.name,
         actorId: actor.id,
-        actorLink: true,
+        actorLink: prototypeActorLink(actor),
         disposition: TOKEN_DISPOSITION.NEUTRAL,
         ...(textureSrc ? { "texture.src": textureSrc } : {}),
         flags: {
@@ -1383,7 +1422,7 @@ async function placeNpcsOnScene(scene, npcs, slots) {
     create.push({
       name: actor.name,
       actorId: actor.id,
-      actorLink: true,
+      actorLink: prototypeActorLink(actor),
       disposition: TOKEN_DISPOSITION.NEUTRAL,
       x: spacing * (index + 1),
       y: 80,
@@ -1399,7 +1438,7 @@ async function placeNpcsOnScene(scene, npcs, slots) {
     await scene.updateEmbeddedDocuments("Token", updates);
   }
   if (create.length) {
-    await scene.createEmbeddedDocuments("Token", create);
+    await scene.createEmbeddedDocuments("Token", await withPrototypeTokenData(create));
   }
   return used;
 }
@@ -1486,7 +1525,7 @@ async function placePcsOnScene(scene, pcs, slots) {
     await scene.updateEmbeddedDocuments("Token", updates);
   }
   if (create.length) {
-    await scene.createEmbeddedDocuments("Token", create);
+    await scene.createEmbeddedDocuments("Token", await withPrototypeTokenData(create));
   }
   return used;
 }
