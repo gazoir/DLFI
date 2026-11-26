@@ -3,13 +3,14 @@
  *
  * Monk's Active Tile Triggers still receives the click (the imported scene
  * action is the trigger). DLFI cancels that action and:
- *   1. Scene A is the scene where the click happened.
- *   2. Scene B is the scene the tile represents.
- *   3. Repaint every scene in the session for that view. The outline stays on
- *      the scene the players are in (`scene.active`). This click does not activate.
- *   4. View B.
- *   5. Repaint every scene again, so the strip on screen matches the copies
- *      on the scenes you are not looking at.
+ *   1. Scene B is the scene the tile represents. The click does not activate it.
+ *   2. View B and wait until that scene is actually on screen.
+ *   3. Repaint only B's nav tiles, then tell Token Magic to reload those sprites.
+ * Token Magic ignores filter writes for a scene you are not looking at, and it
+ * reloads its own copy of the filters when a scene draws. Updating the strip
+ * before the draw, or on scenes that are off screen, does not change what you
+ * see. The strip you are looking at is the one that has to be right. The next
+ * scene you click is corrected when you arrive.
  * A tile that is not a DLFI nav thumbnail still runs its own actions.
  */
 
@@ -23,8 +24,7 @@ import {
   isMattNavTile,
   navTileFilterParams,
   navTileKind,
-  navTileTargetSceneId,
-  sessionScenesFrom
+  navTileTargetSceneId
 } from "./navTileHighlight.mjs";
 
 /** Written by the Combat / Scene Controller macro when the GM saves TMFX UUIDs. */
@@ -98,7 +98,10 @@ export function registerMattNavViewHooks() {
     if (!scene) {
       return;
     }
-    void paintAllSessionNav(scene);
+    // Let Token Magic finish loading the scene, then replace the strip.
+    requestAnimationFrame(() => {
+      void paintViewedScene(scene);
+    });
   };
   if (globalThis.Hooks?.on) {
     Hooks.on("preTriggerTile", (tile, _tileAgain, _tokens, action) => {
@@ -118,7 +121,10 @@ export function registerMattNavViewHooks() {
       if (!globalThis.game?.user?.isGM) {
         return;
       }
-      void paintAllSessionNav(globalThis.canvas?.scene ?? scene);
+      const viewed = globalThis.canvas?.scene;
+      if (viewed) {
+        void paintViewedScene(viewed);
+      }
     });
   }
   return { onCanvasReady };
@@ -181,57 +187,82 @@ function queueNavView(tileDoc) {
  * @param {object} tileDoc
  */
 async function performNavView(tileDoc) {
-  const sceneA = globalThis.canvas?.scene ?? null;
   const sceneB = globalThis.game?.scenes?.get?.(navTileTargetSceneId(tileDoc)) ?? null;
-  if (!sceneA || !sceneB) {
+  if (!sceneB) {
     return;
   }
-  const activeId = playerActiveSceneId();
-  // Every copy, including scenes that are not on screen, before the view.
-  await paintAllSessionNav(sceneA, { activeId, viewedId: sceneB.id });
-  if (sceneA.id !== sceneB.id) {
+  if (globalThis.canvas?.scene?.id !== sceneB.id) {
     await sceneB.view();
   }
-  const viewedId = globalThis.canvas?.scene?.id ?? sceneB.id;
-  await paintAllSessionNav(globalThis.canvas?.scene ?? sceneB, {
-    activeId: playerActiveSceneId(),
-    viewedId
-  });
+  await whenSceneIsViewed(sceneB);
+  await paintViewedScene(sceneB);
 }
 
 /**
- * Write the same active/viewed highlight onto every nav strip in the session.
- * @param {object|null|undefined} anchor
- * @param {{ activeId?: string, viewedId?: string }} [ids]
+ * Token Magic draws a scene from the filters already stored on it, and it
+ * will not refresh a tile on any other scene. Wait until this scene is the
+ * one on screen, then paint that strip.
+ * @param {object} scene
  */
-export async function paintAllSessionNav(anchor, ids = {}) {
-  if (!anchor || !globalThis.game?.user?.isGM) {
+async function whenSceneIsViewed(scene) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const canvas = globalThis.canvas;
+    const viewedId = globalThis.game?.user?.viewedScene;
+    if (
+      canvas?.ready &&
+      canvas.scene?.id === scene.id &&
+      viewedId === scene.id &&
+      (canvas.tiles?.placeables?.length ?? 0) > 0
+    ) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/**
+ * @param {object|null|undefined} scene
+ */
+async function paintViewedScene(scene) {
+  if (!scene || !globalThis.game?.user?.isGM) {
+    return;
+  }
+  if (globalThis.canvas?.scene?.id !== scene.id) {
     return;
   }
   const styles = await loadNavStyles();
   if (!styles) {
     return;
   }
-  const activeId = ids.activeId ?? playerActiveSceneId();
-  const viewedId = ids.viewedId ?? globalThis.canvas?.scene?.id ?? anchor.id ?? "";
-  const all = globalThis.game?.scenes?.contents ?? globalThis.game?.scenes ?? [];
-  const scenes = sessionScenesFrom(anchor, [...all]);
-  const ordered = [
-    ...scenes.filter((scene) => (scene.id ?? scene._id) !== viewedId),
-    ...scenes.filter((scene) => (scene.id ?? scene._id) === viewedId)
-  ];
-  for (const scene of ordered) {
-    await paintNavScene(scene, styles, activeId, viewedId);
+  const activeId = playerActiveSceneId();
+  const viewedId = scene.id;
+  await paintNavScene(scene, styles, activeId, viewedId);
+  reloadViewedNavTiles(scene);
+  const activeName = globalThis.game?.scenes?.get?.(activeId)?.name ?? "none";
+  console.log(`${MODULE_ID} | nav on ${scene.name}: viewed here, players in ${activeName}`);
+}
+
+/**
+ * Flags are already saved. Clear the sprites Token Magic just drew and load
+ * those flags onto the tiles that are actually on screen.
+ * @param {object} scene
+ */
+function reloadViewedNavTiles(scene) {
+  const TokenMagic = globalThis.TokenMagic;
+  const canvas = globalThis.canvas;
+  if (!TokenMagic?._loadFilters || canvas?.scene?.id !== scene.id) {
+    return;
   }
-  const activeName = ordered.find((scene) => (scene.id ?? scene._id) === activeId)?.name
-    ?? globalThis.game?.scenes?.get?.(activeId)?.name
-    ?? "none";
-  const viewedName = ordered.find((scene) => (scene.id ?? scene._id) === viewedId)?.name
-    ?? globalThis.game?.scenes?.get?.(viewedId)?.name
-    ?? "none";
-  console.log(
-    `${MODULE_ID} | nav strips ${ordered.length}: viewed ${viewedName}, players in ${activeName}`
+  const placeables = [...(canvas.tiles?.placeables ?? [])].filter((tile) =>
+    isMattNavTile(tile?.document ?? tile)
   );
+  if (!placeables.length) {
+    return;
+  }
+  for (const placeable of placeables) {
+    TokenMagic._clearImgFiltersByPlaceable?.(placeable);
+  }
+  TokenMagic._loadFilters(placeables, true);
 }
 
 /**
