@@ -5,12 +5,12 @@
  * action is the trigger). DLFI cancels that action and:
  *   1. Scene A is the scene where the click happened.
  *   2. Scene B is the scene the tile represents.
- *   3. Repaint B for the view you are about to open. The outline stays on the
- *      scene the players are in (`scene.active`), which this click does not change.
+ *   3. Repaint every scene in the session for that view. The outline stays on
+ *      the scene the players are in (`scene.active`). This click does not activate.
  *   4. View B.
- *   5. Repaint B again now that it is on screen, then repaint A.
- * Other scenes are left alone. A tile that is not a DLFI nav thumbnail still
- * runs its own Monk's Active Tiles actions, including a scene change.
+ *   5. Repaint every scene again, so the strip on screen matches the copies
+ *      on the scenes you are not looking at.
+ * A tile that is not a DLFI nav thumbnail still runs its own actions.
  */
 
 import {
@@ -23,7 +23,8 @@ import {
   isMattNavTile,
   navTileFilterParams,
   navTileKind,
-  navTileTargetSceneId
+  navTileTargetSceneId,
+  sessionScenesFrom
 } from "./navTileHighlight.mjs";
 
 /** Written by the Combat / Scene Controller macro when the GM saves TMFX UUIDs. */
@@ -89,17 +90,38 @@ export function registerNavHighlightSettings() {
  * Replace MATT's scene change on nav tiles with the view sequence above.
  */
 export function registerMattNavViewHooks() {
-  if (!globalThis.Hooks?.on) {
-    return;
-  }
-  Hooks.on("preTriggerTile", (tile, _tileAgain, _tokens, action) => {
-    try {
-      return onNavTileTrigger(tile, action);
-    } catch (error) {
-      console.warn(`${MODULE_ID} | nav click failed`, error);
-      return undefined;
+  const onCanvasReady = (canvas) => {
+    if (!globalThis.game?.user?.isGM) {
+      return;
     }
-  });
+    const scene = canvas?.scene ?? globalThis.canvas?.scene;
+    if (!scene) {
+      return;
+    }
+    void paintAllSessionNav(scene);
+  };
+  if (globalThis.Hooks?.on) {
+    Hooks.on("preTriggerTile", (tile, _tileAgain, _tokens, action) => {
+      try {
+        return onNavTileTrigger(tile, action);
+      } catch (error) {
+        console.warn(`${MODULE_ID} | nav click failed`, error);
+        return undefined;
+      }
+    });
+    Hooks.on("canvasReady", onCanvasReady);
+    // Pressing 1 activates a scene without necessarily redrawing it.
+    Hooks.on("updateScene", (scene, changes) => {
+      if (!changes || !Object.prototype.hasOwnProperty.call(changes, "active")) {
+        return;
+      }
+      if (!globalThis.game?.user?.isGM) {
+        return;
+      }
+      void paintAllSessionNav(globalThis.canvas?.scene ?? scene);
+    });
+  }
+  return { onCanvasReady };
 }
 
 /**
@@ -164,32 +186,52 @@ async function performNavView(tileDoc) {
   if (!sceneA || !sceneB) {
     return;
   }
-  const styles = await loadNavStyles();
-  const activeBefore = playerActiveSceneId();
-
-  // Write B before it draws, so the first frame is not the previous visit.
-  if (styles) {
-    await paintNavScene(sceneB, styles, activeBefore, sceneB.id);
-  }
+  const activeId = playerActiveSceneId();
+  // Every copy, including scenes that are not on screen, before the view.
+  await paintAllSessionNav(sceneA, { activeId, viewedId: sceneB.id });
   if (sceneA.id !== sceneB.id) {
     await sceneB.view();
   }
-
-  // Token Magic only redraws a tile while its scene is the viewed one.
-  // Paint the scene on screen after the view, then the scene just left.
   const viewedId = globalThis.canvas?.scene?.id ?? sceneB.id;
-  const activeId = playerActiveSceneId();
-  const viewedScene = globalThis.canvas?.scene ?? sceneB;
-  console.log(
-    `${MODULE_ID} | nav ${viewedScene?.name ?? sceneB.name}` +
-      ` viewed, players still in ${globalThis.game?.scenes?.get?.(activeId)?.name ?? "no active scene"}`
-  );
-  if (styles) {
-    await paintNavScene(viewedScene, styles, activeId, viewedId);
-    if (sceneA.id !== viewedId) {
-      await paintNavScene(sceneA, styles, activeId, viewedId);
-    }
+  await paintAllSessionNav(globalThis.canvas?.scene ?? sceneB, {
+    activeId: playerActiveSceneId(),
+    viewedId
+  });
+}
+
+/**
+ * Write the same active/viewed highlight onto every nav strip in the session.
+ * @param {object|null|undefined} anchor
+ * @param {{ activeId?: string, viewedId?: string }} [ids]
+ */
+export async function paintAllSessionNav(anchor, ids = {}) {
+  if (!anchor || !globalThis.game?.user?.isGM) {
+    return;
   }
+  const styles = await loadNavStyles();
+  if (!styles) {
+    return;
+  }
+  const activeId = ids.activeId ?? playerActiveSceneId();
+  const viewedId = ids.viewedId ?? globalThis.canvas?.scene?.id ?? anchor.id ?? "";
+  const all = globalThis.game?.scenes?.contents ?? globalThis.game?.scenes ?? [];
+  const scenes = sessionScenesFrom(anchor, [...all]);
+  const ordered = [
+    ...scenes.filter((scene) => (scene.id ?? scene._id) !== viewedId),
+    ...scenes.filter((scene) => (scene.id ?? scene._id) === viewedId)
+  ];
+  for (const scene of ordered) {
+    await paintNavScene(scene, styles, activeId, viewedId);
+  }
+  const activeName = ordered.find((scene) => (scene.id ?? scene._id) === activeId)?.name
+    ?? globalThis.game?.scenes?.get?.(activeId)?.name
+    ?? "none";
+  const viewedName = ordered.find((scene) => (scene.id ?? scene._id) === viewedId)?.name
+    ?? globalThis.game?.scenes?.get?.(viewedId)?.name
+    ?? "none";
+  console.log(
+    `${MODULE_ID} | nav strips ${ordered.length}: viewed ${viewedName}, players in ${activeName}`
+  );
 }
 
 /**

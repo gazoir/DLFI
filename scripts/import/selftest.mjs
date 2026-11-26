@@ -1178,7 +1178,7 @@ for (const path of paths) {
     "face tiles have no tooltip"
   );
 
-  const { navTileFilterParams } = await import("../canvas/navTileHighlight.mjs");
+  const { navTileFilterParams, sessionScenesFrom } = await import("../canvas/navTileHighlight.mjs");
   const styles = {
     active: [{ filterType: "outline" }],
     neither: [{ filterType: "darken" }]
@@ -1213,6 +1213,14 @@ for (const path of paths) {
     navTileFilterParams(face, "sceneB", "sceneA", styles)[0]?.filterType === "darken",
     "unviewed portrait is darkened, never outlined"
   );
+
+  const session = [
+    { id: "land", name: "00. Landing", folder: "folderA", flags: { dlfi: { importKey: "DL304_1" } } },
+    { id: "hall", name: "04. Hall", folder: { id: "folderA" }, flags: { dlfi: { importKey: "DL304_1" } } },
+    { id: "other", name: "01. Other", folder: "folderB", flags: { dlfi: { importKey: "DL999_1" } } }
+  ];
+  const strip = sessionScenesFrom(session[0], session).map((scene) => scene.id);
+  assert(strip.join(",") === "land,hall", `session strip is landing plus hall (got ${strip.join(",")})`);
 }
 
 // Location POIs → emoji list (strip wikilinks, blank lines between)
