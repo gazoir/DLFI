@@ -9,6 +9,7 @@
  *   stay on the template token. Non-`nPm` tokens are ignored.
  * - Location field drawings (by text/name): Description, POIs / Points of Interest,
  *   Session Notes… — plus legacy Description 1–3 (Description 4 is unused leftover)
+ * - Location Name drawing: hidden DM title (bare scene name, font and TMFX kept)
  * - Battlemaps: ignore A#/P# placeholders; create enemy + party roster lines in
  *   the bottom canvas padding (footprint-spaced, flush to canvas bottom)
  * - Location Item Piles: lower-right outside the map art (bottom padding, 5 cols
@@ -22,6 +23,7 @@ import {
   MODULE_ID,
   TOKEN_DISPOSITION
 } from "../constants.mjs";
+import { bareSceneTitle } from "./sceneOrder.mjs";
 import {
   healthEstimateTokenFlags,
   pickTokenTexture,
@@ -810,6 +812,66 @@ export function classifyLocationFieldLabel(label) {
 }
 
 /**
+ * Hidden DM title drawing on the Expo location template.
+ * Matched by the dlfi flag, or by the template name/text "Location Name".
+ * @param {object|null|undefined} drawing
+ * @returns {boolean}
+ */
+export function isLocationNameDrawing(drawing) {
+  if (!drawing) {
+    return false;
+  }
+  if (drawing.flags?.[FLAG_SCOPE]?.kind === "location-name") {
+    return true;
+  }
+  const name = String(drawing.name ?? "").trim();
+  const text = String(drawing.text ?? "").trim();
+  return name === "Location Name" || text === "Location Name";
+}
+
+/**
+ * Text update for the Location Name drawing. Font, shape, and Token Magic
+ * flags already on the drawing are left in place. Returns null when the
+ * drawing is missing or already shows the bare title and is hidden.
+ * @param {unknown} sceneName
+ * @param {object|null|undefined} drawing
+ * @returns {object|null}
+ */
+export function locationNameDrawingPatch(sceneName, drawing) {
+  if (!isLocationNameDrawing(drawing)) {
+    return null;
+  }
+  const text = bareSceneTitle(sceneName);
+  if (!text) {
+    return null;
+  }
+  const id = drawing.id ?? drawing._id;
+  if (!id) {
+    return null;
+  }
+  const already =
+    String(drawing.text ?? "") === text &&
+    drawing.hidden === true &&
+    drawing.flags?.[FLAG_SCOPE]?.kind === "location-name";
+  if (already) {
+    return null;
+  }
+  return {
+    _id: id,
+    text,
+    hidden: true,
+    name: String(drawing.name ?? "").trim() || "Location Name",
+    flags: {
+      ...(drawing.flags ?? {}),
+      [FLAG_SCOPE]: {
+        ...(drawing.flags?.[FLAG_SCOPE] ?? {}),
+        kind: "location-name"
+      }
+    }
+  };
+}
+
+/**
  * Partition location template drawings into dedicated field boxes.
  * Prefer the first match per kind; duplicates and Description 4 go to leftovers.
  *
@@ -894,6 +956,7 @@ export async function finalizeLocationScene(
     hasManagedBoxes,
     deleteDrawingIds
   });
+  await applyLocationNameDrawing(scene);
 
   const usedNpcIds = await placeNpcsOnScene(scene, npcs, npcSlots);
 
@@ -1303,6 +1366,16 @@ export async function finalizeLeftoversScene(scene, { npcs = [], itemNotes = [] 
     });
     await scene.createEmbeddedDocuments("Note", notes);
   }
+}
+
+async function applyLocationNameDrawing(scene) {
+  const drawings = scene.drawings?.contents ?? scene.drawings ?? [];
+  const drawing = [...drawings].find((entry) => isLocationNameDrawing(entry));
+  const patch = locationNameDrawingPatch(scene?.name, drawing);
+  if (!patch || typeof scene.updateEmbeddedDocuments !== "function") {
+    return;
+  }
+  await scene.updateEmbeddedDocuments("Drawing", [patch]);
 }
 
 async function applyLocationFieldDrawing(

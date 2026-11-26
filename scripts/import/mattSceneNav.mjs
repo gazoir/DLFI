@@ -13,6 +13,7 @@
  */
 
 import { FLAG_SCOPE, MODULE_ID, notify } from "../constants.mjs";
+import { bareSceneTitle } from "./sceneOrder.mjs";
 import { resolveSceneBackgroundSrc } from "./applySceneBackground.mjs";
 import { sceneCanvasMetrics } from "./scenePlacement.mjs";
 
@@ -521,10 +522,11 @@ export function mattTileUpdate(tile, target, side) {
   const id = tile.id ?? tile._id;
   const existing = tile.flags?.[MONKS_ACTIVE_TILES_ID] ?? {};
   const sceneName = String(target.name || "").trim() || "Scene";
+  const hoverName = bareSceneTitle(sceneName) || sceneName;
   const patch = {
     _id: id,
-    // Foundry tile name — shown in Tile HUD / config; pairs with pointer cursor.
-    name: sceneName,
+    // Hover / nameplate label: bare scene title, without the order or emoji.
+    name: hoverName,
     flags: {
       ...(tile.flags ?? {}),
       [FLAG_SCOPE]: {

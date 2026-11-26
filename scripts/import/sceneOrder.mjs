@@ -54,6 +54,19 @@ export function formatSceneDmName(kind, entry, order) {
 }
 
 /**
+ * Scene title without the DM order prefix or pin/swords emoji.
+ * `01. 📍 Korbane Village Approach` → `Korbane Village Approach`.
+ * @param {unknown} name
+ * @returns {string}
+ */
+export function bareSceneTitle(name) {
+  return String(name ?? "")
+    .trim()
+    .replace(/^(?:\d{1,3}\.\s*)?(?:(?:\u{1F4CD}|\u{2694}\u{FE0F}?)\s*)?/u, "")
+    .trim();
+}
+
+/**
  * Session code for special page names (displayCode preferred).
  * @param {{ displayCode?: string, sessionCode?: string }} manifest
  * @returns {string}

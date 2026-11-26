@@ -100,6 +100,8 @@ const {
   buildItemPileTokenData,
   classifyLocationFieldDrawings,
   classifyLocationFieldLabel,
+  isLocationNameDrawing,
+  locationNameDrawingPatch,
   compareItemsForPilePlacement,
   finalizeItemPileActor,
   ITEM_PILE_COLUMNS,
@@ -122,6 +124,7 @@ const {
 } = await import("./scenePlacement.mjs");
 const { ITEM_PILES_FOLDER_NAME, PC_ACTOR_FOLDER_NAME } = await import("../constants.mjs");
 const {
+  bareSceneTitle,
   buildMsdSceneSequence,
   formatSceneDmName,
   isCombatChallengeEntry,
@@ -1058,7 +1061,11 @@ for (const path of paths) {
     "left"
   );
   assert(update["texture.src"] === "world/dock.webp", "nav tile texture set");
-  assert(update.name === "01. 📍 Dock", "nav tile named for hover/HUD");
+  assert(update.name === "Dock", "nav tile hover name drops order and emoji");
+  assert(
+    update.flags["monks-active-tiles"].actions[0].data.sceneid.name === "01. 📍 Dock",
+    "scene action keeps the full DM name"
+  );
   assert(update.flags["monks-active-tiles"].pointer === true, "nav tile pointer cursor");
   assert(update.flags["monks-active-tiles"].actions[0].action === "scene", "scene action");
   assert(
@@ -1170,8 +1177,15 @@ for (const path of paths) {
     mattNavTooltipText({
       name: "01. 📍 Dock",
       flags: { dlfi: { kind: "matt-nav-left" } }
-    }) === "01. 📍 Dock",
-    "tooltip text from nav tile"
+    }) === "Dock",
+    "tooltip text drops order and emoji"
+  );
+  assert(
+    mattNavTooltipText({
+      name: "02. ⚔️ Ambush",
+      flags: { dlfi: { kind: "matt-nav-right" } }
+    }) === "Ambush",
+    "battlemap hover drops swords emoji"
   );
   assert(
     mattNavTooltipText({ name: "Nope", flags: { dlfi: { kind: "matt-nav-face" } } }) === "",
@@ -1276,6 +1290,47 @@ for (const path of paths) {
     "Description 4 goes to leftovers"
   );
   assert(classified.managed.length === 4, "managed count excludes unrelated drawings");
+  assert(classifyLocationFieldLabel("Location Name") == null, "Location Name is not a field box");
+  assert(isLocationNameDrawing({ name: "Location Name", text: "Location Name" }), "template title drawing");
+  const titleDrawing = {
+    id: "title",
+    name: "Location Name",
+    text: "Location Name",
+    hidden: true,
+    fontFamily: "Looking Glass",
+    fontSize: 96,
+    flags: {
+      tokenmagic: { filters: [{ tmFilters: { tmFilterId: "myShadow" } }] },
+      "more-text-options": { textStyle: { dropShadow: true } }
+    }
+  };
+  const titlePatch = locationNameDrawingPatch("01. 📍 Korbane Village Approach", titleDrawing);
+  assert(titlePatch?.text === "Korbane Village Approach", "location title drops number and pin");
+  assert(titlePatch?.hidden === true, "location title stays hidden");
+  assert(titlePatch?.flags?.tokenmagic?.filters?.length === 1, "location title keeps TMFX");
+  assert(titlePatch?.flags?.["more-text-options"]?.textStyle?.dropShadow === true, "location title keeps text style");
+  assert(titlePatch?.flags?.dlfi?.kind === "location-name", "location title flagged");
+  assert(!("fontFamily" in titlePatch), "location title patch does not rewrite the font");
+  assert(
+    locationNameDrawingPatch("01. 📍 Korbane Village Approach", {
+      ...titleDrawing,
+      text: "Korbane Village Approach",
+      flags: { ...titleDrawing.flags, dlfi: { kind: "location-name" } }
+    }) == null,
+    "location title already set is left alone"
+  );
+  const expoTemplate = JSON.parse(
+    readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../templates/scenes/location.json"),
+      "utf8"
+    )
+  );
+  const bundledTitle = (expoTemplate.drawings ?? []).find((drawing) => drawing.name === "Location Name");
+  assert(bundledTitle?.text === "Location Name", "bundled expo template includes Location Name");
+  assert(bundledTitle?.hidden === true, "bundled Location Name stays hidden");
+  assert(bundledTitle?.fontFamily === "Looking Glass", "bundled Location Name keeps its font");
+  assert(bundledTitle?.flags?.tokenmagic?.filters?.length > 0, "bundled Location Name keeps TMFX");
+  assert((expoTemplate.tiles ?? []).length >= 22, "bundled expo template keeps the nav strip");
 
   const legacy = classifyLocationFieldDrawings([
     { id: "a", text: "Description 1" },
@@ -1561,6 +1616,10 @@ for (const path of paths) {
     formatSceneDmName("location", { name: "Dock" }, 1) === "01. 📍 Dock",
     "location DM name"
   );
+  assert(bareSceneTitle("01. 📍 Korbane Village Approach") === "Korbane Village Approach", "bare location title");
+  assert(bareSceneTitle("02. ⚔️ Ambush") === "Ambush", "bare battlemap title");
+  assert(bareSceneTitle("00. DL304 Landing Page") === "DL304 Landing Page", "bare landing title");
+  assert(bareSceneTitle("Dock") === "Dock", "bare title leaves a plain name");
   {
     const { formatSpecialSceneName } = await import("./sceneOrder.mjs");
     const manifest = { displayCode: "DL304", sessionCode: "SESSION_012" };

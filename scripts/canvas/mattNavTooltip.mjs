@@ -6,6 +6,7 @@
  */
 
 import { FLAG_SCOPE, MODULE_ID } from "../constants.mjs";
+import { bareSceneTitle } from "../import/sceneOrder.mjs";
 
 const TOOLTIP_ID = "dlfi-matt-nav-tooltip";
 const HIT_ATTR = "data-dlfi-matt-tip";
@@ -96,7 +97,7 @@ export function mattNavTooltipText(tileDoc) {
   if (kind !== "matt-nav-left" && kind !== "matt-nav-right") {
     return "";
   }
-  return String(tileDoc.name || "").trim();
+  return bareSceneTitle(tileDoc.name);
 }
 
 /**
