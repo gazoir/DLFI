@@ -73,6 +73,66 @@ export function navTileTargetSceneId(tile) {
  * @param {{ active?: object[], neither?: object[] }} styles
  * @returns {object[]} Empty array clears filters.
  */
+/**
+ * @param {object|null|undefined} doc
+ * @returns {string|null}
+ */
+export function folderIdOf(doc) {
+  const folder = doc?.folder;
+  if (!folder) {
+    return null;
+  }
+  if (typeof folder === "string") {
+    return folder;
+  }
+  return folder.id ?? folder._id ?? null;
+}
+
+/**
+ * Scenes that share a nav strip with `fromScene`: same folder, session code, or import.
+ * @param {object|null|undefined} fromScene
+ * @param {object[]} allScenes
+ * @returns {object[]}
+ */
+export function sessionScenesFrom(fromScene, allScenes = []) {
+  if (!fromScene) {
+    return [];
+  }
+  const folderId = folderIdOf(fromScene);
+  const code = fromScene.flags?.dlfi?.sessionCode ?? null;
+  const key = fromScene.flags?.dlfi?.importKey ?? null;
+  const selfId = fromScene.id ?? fromScene._id ?? null;
+  /** @type {object[]} */
+  const matched = [];
+  const seen = new Set();
+  for (const scene of allScenes) {
+    if (!scene) {
+      continue;
+    }
+    const id = scene.id ?? scene._id ?? null;
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    const sameFolder = Boolean(folderId) && folderIdOf(scene) === folderId;
+    const sameCode = Boolean(code) && scene.flags?.dlfi?.sessionCode === code;
+    const sameKey = Boolean(key) && scene.flags?.dlfi?.importKey === key;
+    if (sameFolder || sameCode || sameKey || id === selfId) {
+      seen.add(id);
+      matched.push(scene);
+    }
+  }
+  if (!matched.length) {
+    matched.push(fromScene);
+  }
+  matched.sort((a, b) =>
+    String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, {
+      numeric: true,
+      sensitivity: "base"
+    })
+  );
+  return matched;
+}
+
 export function navTileFilterParams(tile, activeId, viewedId, styles) {
   const id = navTileTargetSceneId(tile);
   const isActive = Boolean(id) && id === normalizeSceneId(activeId);

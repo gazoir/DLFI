@@ -157,7 +157,7 @@ Hooks.once("init", () => {
 
   // Register canvas hooks before the first canvasReady fires.
   registerSuppressSceneLoadingBar();
-  registerMattNavViewHooks();
+  canvasReadyHandlers.push(registerMattNavViewHooks().onCanvasReady);
   canvasReadyHandlers.push(registerHideLandingEffectsHooks().onCanvasReady);
   canvasReadyHandlers.push(registerMattNavTooltipHooks().onCanvasReady);
 
