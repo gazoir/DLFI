@@ -4,8 +4,9 @@ Foundry VTT module that loads **DLCE Session Packages** into a world.
 
 Design: [`gazoir/DLCE` → `docs/FOUNDRY_SYNC.md`](https://github.com/gazoir/DLCE/blob/main/docs/FOUNDRY_SYNC.md).
 
-## Status (`0.1.57`)
+## Status (`0.1.58`)
 
+- **0.1.58:** Nav highlights are applied to the scene you are looking at, after it has finished drawing. A click views the new scene and then corrects that strip: the viewed thumbnail is clear, the players' scene stays outlined, and the others are darkened. Copies on scenes you are not looking at are left until you open them.
 - **0.1.57:** A nav click updates the strip on every scene in the session. The scene you are viewing is clear. The scene the players are in stays outlined until you press 1 to activate. On the landing page, while it is both, that thumbnail is clear and outlined and the others are darkened.
 - **0.1.56:** Nav outline follows the scene the players are in. The thumbnail of the scene you are viewing is clear. A click repaints that strip after the scene is on screen, so the outline no longer sticks to the tile you clicked.
 - **0.1.55:** Nav-tile clicks are handled by DLFI. A click repaints the destination, views it without activating it, then repaints the scene you left. Portrait tokens never take the outline: clear while their scene is viewed, darkened otherwise. Background thumbs outline the active scene, stay clear when viewed, and darken otherwise. Highlight macro UUIDs can be set in module settings, or are read from the Combat / Scene Controller save. No reimport required.
