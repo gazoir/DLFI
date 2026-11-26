@@ -20,6 +20,7 @@ import {
   SETTING_NAV_TMFX_NEITHER,
   setting
 } from "../constants.mjs";
+import { bareSceneTitle } from "../import/sceneOrder.mjs";
 import {
   isMattNavTile,
   navTileFilterParams,
@@ -230,6 +231,7 @@ async function paintViewedScene(scene) {
   if (globalThis.canvas?.scene?.id !== scene.id) {
     return;
   }
+  await renameNavHoverLabels(scene);
   const styles = await loadNavStyles();
   if (!styles) {
     return;
@@ -263,6 +265,36 @@ function reloadViewedNavTiles(scene) {
     TokenMagic._clearImgFiltersByPlaceable?.(placeable);
   }
   TokenMagic._loadFilters(placeables, true);
+}
+
+/**
+ * Nav hover labels and nameplates read the tile name. Strip the order and emoji
+ * on the scene that is on screen, including scenes imported before this change.
+ * @param {object} scene
+ */
+async function renameNavHoverLabels(scene) {
+  const tiles = [...(scene.tiles?.contents ?? scene.tiles ?? [])];
+  const patches = [];
+  for (const tile of tiles) {
+    const kind = navTileKind(tile);
+    if (kind !== "matt-nav-left" && kind !== "matt-nav-right") {
+      continue;
+    }
+    const current = String(tile.name ?? "");
+    const next = bareSceneTitle(current);
+    if (!next || next === current) {
+      continue;
+    }
+    const id = tile.id ?? tile._id;
+    if (!id) {
+      continue;
+    }
+    patches.push({ _id: id, name: next });
+    tile.name = next;
+  }
+  if (patches.length && typeof scene.updateEmbeddedDocuments === "function") {
+    await scene.updateEmbeddedDocuments("Tile", patches);
+  }
 }
 
 /**
